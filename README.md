@@ -1,54 +1,61 @@
-# Sample Hardhat 3 Beta Project (`mocha` and `ethers`)
+# 🏛️ DAO Project
 
-This project showcases a Hardhat 3 Beta project using `mocha` for tests and the `ethers` library for Ethereum interactions.
+A small governance DAO built with Hardhat and OpenZeppelin contracts. Token holders can create proposals, vote on them, and execute approved decisions through an on-chain governance flow. 
 
-To learn more about the Hardhat 3 Beta, please visit the [Getting Started guide](https://hardhat.org/docs/getting-started#getting-started-with-hardhat-3). To share your feedback, join our [Hardhat 3 Beta](https://hardhat.org/hardhat3-beta-telegram-group) Telegram group or [open an issue](https://github.com/NomicFoundation/hardhat/issues/new) in our GitHub issue tracker.
+## ✨ What it does
 
-## Project Overview
+This project implements a classic DAO lifecycle:
 
-This example project includes:
+- 📝 Create proposals
+- 🗳️ Vote on proposals
+- ⏳ Queue successful proposals
+- ✅ Execute approved decisions
 
-- A simple Hardhat configuration file.
-- Foundry-compatible Solidity unit tests.
-- TypeScript integration tests using `mocha` and ethers.js
-- Examples demonstrating how to connect to different types of networks, including locally simulating OP mainnet.
+The goal is to build the governance logic first, test it locally, deploy it to Sepolia, and then connect a frontend for user interaction.
 
-## Usage
+## 🚀 Run locally
 
-### Running Tests
+### 1. Install dependencies
+```bash
+npm install
+```
 
-To run all the tests in the project, execute the following command:
+### 2. Create your env file
+Create a `.env` file at the root of the project:
 
-```shell
+```env
+SEPOLIA_RPC_URL=https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY
+SEPOLIA_PRIVATE_KEY=your_private_key
+ETHERSCAN_API_KEY=your_etherscan_api_key
+```
+
+### 3. Compile contracts
+```bash
+npx hardhat compile
+```
+
+### 4. Run tests
+```bash
 npx hardhat test
 ```
 
-You can also selectively run the Solidity or `mocha` tests:
-
-```shell
-npx hardhat test solidity
-npx hardhat test mocha
+### 5. Start a local blockchain
+```bash
+npx hardhat node
 ```
 
-### Make a deployment to Sepolia
+### 6. Deploy locally
+In a second terminal:
 
-This project includes an example Ignition module to deploy the contract. You can deploy this module to a locally simulated chain or to Sepolia.
-
-To run the deployment to a local chain:
-
-```shell
-npx hardhat ignition deploy ignition/modules/Counter.ts
+```bash
+npx hardhat run --network localhost scripts/deploy.ts
 ```
 
-To run the deployment to Sepolia, you need an account with funds to send the transaction. The provided Hardhat configuration includes a Configuration Variable called `SEPOLIA_PRIVATE_KEY`, which you can use to set the private key of the account you want to use.
+## 📌 Notes
 
-You can set the `SEPOLIA_PRIVATE_KEY` variable using the `hardhat-keystore` plugin or by setting it as an environment variable.
-
-To set the `SEPOLIA_PRIVATE_KEY` config variable using `hardhat-keystore`:
-
-```shell
-npx hardhat keystore set SEPOLIA_PRIVATE_KEY
-```
+- Keep `.env` private and never push it to GitHub.
+- Use `.env.example` for placeholder values only.
+- After Sepolia deployment, the frontend can use the deployed addresses and ABIs.
 
 After setting the variable, you can run the deployment with the Sepolia network:
 
