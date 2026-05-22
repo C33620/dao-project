@@ -1,20 +1,24 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/governance/Governor.sol";
-import "@openzeppelin/contracts/governance/extensions/GovernorSettings.sol";
-import "@openzeppelin/contracts/governance/extensions/GovernorCountingSimple.sol";
-import "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
-import "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
-import "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol";
-import "@openzeppelin/contracts/governance/TimelockController.sol";
-import "@openzeppelin/contracts/governance/utils/IVotes.sol";
+import {Governor} from "@openzeppelin/contracts/governance/Governor.sol";
+import {GovernorSettings} from "@openzeppelin/contracts/governance/extensions/GovernorSettings.sol";
+import {GovernorCountingSimple} from "@openzeppelin/contracts/governance/extensions/GovernorCountingSimple.sol";
+import {GovernorVotes} from "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol";
+import {GovernorVotesQuorumFraction} from "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol";
+import {GovernorTimelockControl} from "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol";
+import {TimelockController} from "@openzeppelin/contracts/governance/TimelockController.sol";
+import {IVotes} from "@openzeppelin/contracts/governance/utils/IVotes.sol";
 
 /// @dev Security note:
 /// This Governor is only fully operational once the Timelock grants it the
 /// required roles. In final DAO wiring, the Governor should hold at least
 /// PROPOSER_ROLE on the Timelock, and ideally EXECUTOR_ROLE and
 /// CANCELLER_ROLE as recommended by OpenZeppelin for GovernorTimelockControl.
+
+/// @title MyGovernor
+/// @author Clemm
+/// @notice Governance contract for proposal creation, voting, queuing, and execution through a timelock.
 
 contract MyGovernor is
     Governor,
@@ -41,6 +45,7 @@ contract MyGovernor is
 
     // The following functions are required overrides by Solidity.
 
+    /// @notice Returns the delay, in blocks, before voting on a proposal starts.
     function votingDelay()
         public
         view
@@ -50,6 +55,7 @@ contract MyGovernor is
         return super.votingDelay();
     }
 
+    /// @notice Returns the duration, in blocks, that voting remains open.
     function votingPeriod()
         public
         view
@@ -59,6 +65,8 @@ contract MyGovernor is
         return super.votingPeriod();
     }
 
+    /// @notice Returns the quorum required for a proposal at a given block number.
+    /// @param blockNumber The block number used to calculate quorum.
     function quorum(
         uint256 blockNumber
     )
@@ -70,6 +78,8 @@ contract MyGovernor is
         return super.quorum(blockNumber);
     }
 
+    /// @notice Returns the current state of a proposal.
+    /// @param proposalId The id of the proposal.
     function state(
         uint256 proposalId
     )
@@ -81,12 +91,15 @@ contract MyGovernor is
         return super.state(proposalId);
     }
 
+    /// @notice Returns whether a proposal must be queued before execution.
+    /// @param proposalId The id of the proposal.
     function proposalNeedsQueuing(
         uint256 proposalId
     ) public view override(Governor, GovernorTimelockControl) returns (bool) {
         return super.proposalNeedsQueuing(proposalId);
     }
 
+    /// @notice Returns the minimum number of votes required to create a proposal.
     function proposalThreshold()
         public
         view

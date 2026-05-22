@@ -13,6 +13,10 @@ import {TimelockController} from "@openzeppelin/contracts/governance/TimelockCon
 /// - Avoid adding extra proposers besides the Governor unless you intentionally
 ///   want those accounts to have the power to queue and potentially interfere
 ///   with governance operations.
+
+/// @title MyTimelockController
+/// @author Clemm
+/// @notice Timelock used by the DAO Governor to delay execution of approved proposals.
 contract MyTimelockController is TimelockController {
     constructor(
         uint256 minDelay,
