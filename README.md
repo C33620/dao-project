@@ -1,28 +1,26 @@
 # DAO Project
 
-A small governance DAO built with Hardhat 3 and OpenZeppelin contracts. Token holders can create proposals, vote on them, queue successful proposals through a timelock, and execute approved decisions on-chain.
+A governance DAO built with Hardhat 3 and OpenZeppelin contracts. Token holders can propose changes, vote on them, queue approved proposals through a timelock, and execute them on-chain.
 
-## What this project does
+## Overview
 
-This project implements a classic DAO governance lifecycle:
+This project implements a standard DAO governance lifecycle around a simple `Box` contract used as the execution target.
 
-- Create proposals
-- Vote on proposals
-- Queue successful proposals
-- Execute approved decisions after a timelock delay
+Governance flow:
+1. Delegate voting power.
+2. Create a proposal.
+3. Vote during the voting period.
+4. Queue a successful proposal in the timelock.
+5. Execute it after the timelock delay.
+6. Update the target contract state on-chain.
 
-The current local demo governs a simple `Box` contract, which is used to prove that proposals can be executed end to end through the DAO flow. 
+## Contracts
 
-## Governance flow
-
-The governance lifecycle in this project is:
-
-1. A token holder delegates voting power.
-2. A proposal is created.
-3. Token holders vote during the voting period.
-4. If the proposal succeeds, it is queued in the timelock.
-5. After the timelock delay, it can be executed.
-6. The target contract state is updated on-chain. [web:845][web:843]
+- `GovernanceToken.sol` — governance token with voting power.
+- `MyGovernor.sol` — governor contract managing proposals, voting, queueing, execution, and cancellation.
+- `MyTimelockController.sol` — timelock enforcing delayed execution.
+- `Box.sol` — simple target contract used to verify end-to-end governance execution.
+- `MockVotesToken.sol` — helper contract used only for testing.
 
 ## Project structure
 
@@ -33,10 +31,10 @@ scripts/
   runLifecycle.ts
 test/
   GovernanceFlow.ts
+  Governor.defensive.ts
 deployments/
 hardhat.config.ts
 ```
-
 
 ## Requirements
 
@@ -44,65 +42,63 @@ hardhat.config.ts
 - npm
 - Git
 
-Install dependencies with:
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-## Local verification
-
-```bash
-npx hardhat test
-```
-
-This runs the automated governance test, deploys fresh contracts in a local test environment, and checks the full flow: delegate, propose, vote, queue, execute. 
-
-## Run the project locally
-
-### 1. Compile the contracts
+## Compile
 
 ```bash
 npx hardhat compile
 ```
 
-### 2. Start the local blockchain
+## Test
 
-In the first terminal:
-
-```bash
-npx hardhat node
-```
-
-Keep this terminal running. Hardhat’s local node provides a persistent local blockchain for deployment and interaction. 
-
-### 3. Deploy the contracts locally
-
-In a second terminal:
+Run the full test suite:
 
 ```bash
-npx hardhat run --network localhost scripts/deploy.ts
+npx hardhat test
 ```
 
-This deploys the governance token, timelock, governor, and `Box`, then saves the deployment addresses to `deployments/localhost.json`. 
-
-### 4. Run the full governance lifecycle
-
-Still in the second terminal:
+Run coverage:
 
 ```bash
-npx hardhat run --network localhost scripts/runLifecycle.ts
+npx hardhat test --coverage
 ```
 
-This script automatically:
-- delegates voting power,
-- creates a proposal,
-- casts a vote,
-- advances the voting period,
-- queues the proposal,
-- advances the timelock delay,
-- executes the proposal,
-- and confirms that the `Box` value was updated. 
+## Coverage status
+
+Current coverage results for core contracts:
+
+- `Box.sol` — 100% line / 100% branch
+- `GovernanceToken.sol` — 100% line / 100% branch
+- `MyGovernor.sol` — 100% line / 100% branch
+
+`MockVotesToken.sol` is a testing helper, so it is not treated as a core production contract for coverage purposes.
+
+## Security review status
+
+The current test suite covers:
+
+- Full governance lifecycle: propose → vote → queue → execute
+- Timelock-enforced execution
+- Direct write protection on `Box` after ownership transfer
+- Owner-only minting on `GovernanceToken`
+- Revert behavior for unauthorized mint attempts
+- Revert behavior for unauthorized timelock role grants
+- Revert behavior for premature queue / execute attempts
+- Defeated proposal path
+- Proposal cancellation path
+
+## Local workflow
+
+A local deployment and scripted lifecycle flow exist in:
+
+- `scripts/deploy.ts`
+- `scripts/runLifecycle.ts`
+
 
 
 
