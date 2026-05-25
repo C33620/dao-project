@@ -38,3 +38,4 @@
 .vscode/
 .idea/
 sepolia_deployment.txt
+.vscode_hardhat_config_*.ts
