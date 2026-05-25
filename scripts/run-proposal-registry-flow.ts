@@ -1,0 +1,493 @@
+import hre from "hardhat";
+import fs from "node:fs";
+import path from "node:path";
+
+type DeploymentFile = {
+  network: string;
+  chainId: number;
+  deployer: string;
+  governanceToken: string;
+  timelock: string;
+  governor: string;
+  box: string;
+  proposalRegistry: string;
+  minDelay: number;
+  deployedAt: string;
+};
+
+type Phase = "propose" | "vote" | "queue" | "execute" | "auto";
+
+async function mineBlocks(provider: any, count: number) {
+  for (let i = 0; i < count; i++) {
+    await provider.request({
+      method: "evm_mine",
+      params: [],
+    });
+  }
+}
+
+async function increaseTime(provider: any, seconds: number) {
+  await provider.request({
+    method: "evm_increaseTime",
+    params: [seconds],
+  });
+  await provider.request({
+    method: "evm_mine",
+    params: [],
+  });
+}
+
+function getNetworkName() {
+  return process.env.HARDHAT_NETWORK ?? "localhost";
+}
+
+function isLocalNetwork(networkName: string) {
+  return networkName === "localhost" || networkName === "hardhat";
+}
+
+function loadDeployment(): DeploymentFile {
+  const networkName = getNetworkName();
+  const filePath = path.join(
+    process.cwd(),
+    "deployments",
+    `${networkName}.json`,
+  );
+
+  if (!fs.existsSync(filePath)) {
+    throw new Error(
+      `Deployment file not found: ${filePath}\nRun the deploy script first for --network ${networkName}.`,
+    );
+  }
+
+  const raw = fs.readFileSync(filePath, "utf8");
+  return JSON.parse(raw) as DeploymentFile;
+}
+
+function expectEqual<T>(actual: T, expected: T, message: string) {
+  if (actual !== expected) {
+    throw new Error(`${message}. Expected: ${expected}, got: ${actual}`);
+  }
+}
+
+function getPhase(networkName: string): Phase {
+  const cliPhase = process.env.REGISTRY_FLOW_PHASE as Phase | undefined;
+
+  if (cliPhase) {
+    return cliPhase;
+  }
+
+  if (!isLocalNetwork(networkName)) {
+    return "propose";
+  }
+  return "auto";
+}
+
+function getProposalFilePath(networkName: string) {
+  const dir = path.join(process.cwd(), "deployments");
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `${networkName}.proposal-registry-proposal.json`);
+}
+
+function saveProposalData(networkName: string, data: any) {
+  const filePath = getProposalFilePath(networkName);
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
+  console.log(`Proposal data saved to: ${filePath}`);
+}
+
+function loadProposalData(networkName: string) {
+  const filePath = getProposalFilePath(networkName);
+
+  if (!fs.existsSync(filePath)) {
+    throw new Error(
+      `Proposal data file not found: ${filePath}\nRun the propose phase first.`,
+    );
+  }
+
+  const data = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  console.log(`Loaded proposal data from: ${filePath}`);
+  return data;
+}
+
+async function main() {
+  const connection = await hre.network.getOrCreate();
+  const { ethers } = connection;
+  const provider = connection.provider;
+  const [deployer] = await ethers.getSigners();
+
+  const networkName = getNetworkName();
+  const phase = getPhase(networkName);
+  const deployment = loadDeployment();
+
+  console.log("Network:", networkName);
+  console.log("Phase:", phase);
+  console.log("GovernanceToken:", deployment.governanceToken);
+  console.log("Governor:", deployment.governor);
+  console.log("ProposalRegistry:", deployment.proposalRegistry);
+  console.log("Deployer:", deployer.address);
+
+  const token = await ethers.getContractAt(
+    "GovernanceToken",
+    deployment.governanceToken,
+  );
+  const governor = await ethers.getContractAt(
+    "MyGovernor",
+    deployment.governor,
+  );
+  const proposalRegistry = await ethers.getContractAt(
+    "ProposalRegistry",
+    deployment.proposalRegistry,
+  );
+
+  const owner = await proposalRegistry.owner();
+  console.log("ProposalRegistry owner:", owner);
+  expectEqual(
+    owner.toLowerCase(),
+    deployment.timelock.toLowerCase(),
+    "ProposalRegistry owner must be the timelock",
+  );
+
+  const existingVotes = await token.getVotes(deployer.address);
+  if (existingVotes === 0n) {
+    console.log("\nDelegating voting power...");
+    await (await token.delegate(deployer.address)).wait();
+  } else {
+    console.log("\nVoting power already delegated.");
+  }
+
+  const votes = await token.getVotes(deployer.address);
+  console.log("Current votes:", votes.toString());
+
+  if (votes === 0n) {
+    throw new Error("Deployer has no voting power after delegation.");
+  }
+
+  const votingDelay = Number(await governor.votingDelay());
+  const votingPeriod = Number(await governor.votingPeriod());
+
+  console.log("Voting delay:", votingDelay);
+  console.log("Voting period:", votingPeriod);
+
+  const recordedProposalReference = 1;
+  const entryDescription = "DAO approved: Record first registry entry";
+  const entryProposer = deployer.address;
+
+  const targets = [deployment.proposalRegistry];
+  const values = [0];
+  const calldatas = [
+    proposalRegistry.interface.encodeFunctionData("recordEntry", [
+      recordedProposalReference,
+      entryDescription,
+      entryProposer,
+    ]),
+  ];
+
+  const proposalDescription =
+    "Proposal #2: Record first DAO decision in ProposalRegistry";
+  const descriptionHash = ethers.id(proposalDescription);
+
+  if (phase === "propose" || phase === "auto") {
+    const startingEntryCount = await proposalRegistry.entryCount();
+    console.log(
+      "Starting registry entry count:",
+      startingEntryCount.toString(),
+    );
+
+    console.log("\nCreating proposal...");
+    const proposeTx = await governor.propose(
+      targets,
+      values,
+      calldatas,
+      proposalDescription,
+    );
+
+    const proposeReceipt = await proposeTx.wait();
+
+    const proposalCreatedLog = proposeReceipt!.logs.find((log: any) => {
+      try {
+        const parsed = governor.interface.parseLog(log);
+        return parsed?.name === "ProposalCreated";
+      } catch {
+        return false;
+      }
+    });
+
+    if (!proposalCreatedLog) {
+      throw new Error("ProposalCreated event not found");
+    }
+
+    const parsedLog = governor.interface.parseLog(proposalCreatedLog);
+    const proposalId = parsedLog!.args.proposalId;
+
+    console.log("Proposal created with ID:", proposalId.toString());
+
+    saveProposalData(networkName, {
+      proposalId: proposalId.toString(),
+      proposalDescription,
+      descriptionHash,
+      targets,
+      values,
+      calldatas,
+      recordedProposalReference,
+      entryDescription,
+      entryProposer,
+      startingEntryCount: startingEntryCount.toString(),
+    });
+
+    if (phase === "propose" && !isLocalNetwork(networkName)) {
+      console.log(
+        "Proposal created on public network. " +
+          "Wait until governor.state(proposalId) is Active (1), " +
+          "then rerun with REGISTRY_FLOW_PHASE=vote.",
+      );
+      return;
+    }
+
+    if (phase === "auto" && isLocalNetwork(networkName)) {
+      if (votingDelay > 0) {
+        console.log(
+          `\nMining ${votingDelay} blocks for voting delay boundary...`,
+        );
+        await mineBlocks(provider, votingDelay);
+      }
+
+      console.log("Mining 1 additional block to move proposal to Active...");
+      await mineBlocks(provider, 1);
+
+      const activeState = await governor.state(proposalId);
+      console.log("Proposal state before voting:", activeState.toString());
+      expectEqual(activeState, 1n, "Proposal must be Active before voting");
+
+      console.log("Casting vote...");
+      await (await governor.castVote(proposalId, 1)).wait();
+
+      const proposalVotes = await governor.proposalVotes(proposalId);
+      console.log("Votes after casting:");
+      console.log("Against:", proposalVotes.againstVotes.toString());
+      console.log("For:", proposalVotes.forVotes.toString());
+      console.log("Abstain:", proposalVotes.abstainVotes.toString());
+
+      if (proposalVotes.forVotes === 0n) {
+        throw new Error("Proposal has zero FOR votes after castVote.");
+      }
+
+      console.log(`Mining ${votingPeriod + 1} blocks for voting period...`);
+      await mineBlocks(provider, votingPeriod + 1);
+
+      const stateAfterVote = await governor.state(proposalId);
+      console.log("Proposal state after voting:", stateAfterVote.toString());
+      expectEqual(
+        stateAfterVote,
+        4n,
+        "Proposal must be Succeeded after voting",
+      );
+
+      console.log("\nQueueing proposal...");
+      await (
+        await governor.queue(targets, values, calldatas, descriptionHash)
+      ).wait();
+
+      const queuedState = await governor.state(proposalId);
+      console.log("Proposal state after queue:", queuedState.toString());
+      expectEqual(queuedState, 5n, "Proposal must be Queued after queue");
+
+      console.log("Advancing time for timelock delay...");
+      await increaseTime(provider, deployment.minDelay + 1);
+
+      console.log("Executing proposal...");
+      await (
+        await governor.execute(targets, values, calldatas, descriptionHash)
+      ).wait();
+
+      const executedState = await governor.state(proposalId);
+      console.log("Proposal state after execution:", executedState.toString());
+      expectEqual(
+        executedState,
+        7n,
+        "Proposal must be Executed after execution",
+      );
+
+      const endingEntryCount = await proposalRegistry.entryCount();
+      console.log("Ending registry entry count:", endingEntryCount.toString());
+
+      expectEqual(
+        endingEntryCount,
+        startingEntryCount + 1n,
+        "entryCount must increase by exactly 1",
+      );
+
+      const newEntryId = endingEntryCount;
+      const entry = await proposalRegistry.getEntry(newEntryId);
+
+      console.log("\nRecorded entry:");
+      console.log("id:", entry.id.toString());
+      console.log("proposalId:", entry.proposalId.toString());
+      console.log("description:", entry.description);
+      console.log("proposer:", entry.proposer);
+      console.log("timestamp:", entry.timestamp.toString());
+
+      expectEqual(
+        entry.id,
+        newEntryId,
+        "Entry ID must match the new entry index",
+      );
+      expectEqual(
+        entry.proposalId,
+        BigInt(recordedProposalReference),
+        "Stored proposal reference must match expected value",
+      );
+      expectEqual(
+        entry.description,
+        entryDescription,
+        "Stored description must match the expected description",
+      );
+      expectEqual(
+        entry.proposer.toLowerCase(),
+        entryProposer.toLowerCase(),
+        "Stored proposer must match deployer",
+      );
+
+      if (entry.timestamp <= 0n) {
+        throw new Error(
+          `Expected entry.timestamp to be > 0, got ${entry.timestamp}`,
+        );
+      }
+
+      console.log("\nProposalRegistry governance flow completed successfully.");
+      return;
+    }
+  }
+
+  const proposalData = loadProposalData(networkName);
+  const proposalId = BigInt(proposalData.proposalId);
+
+  if (phase === "vote") {
+    const currentState = await governor.state(proposalId);
+    console.log("Current proposal state:", currentState.toString());
+    expectEqual(currentState, 1n, "Proposal must be Active before voting");
+
+    console.log("Casting vote...");
+    await (await governor.castVote(proposalId, 1)).wait();
+
+    const proposalVotes = await governor.proposalVotes(proposalId);
+    console.log("Votes after casting:");
+    console.log("Against:", proposalVotes.againstVotes.toString());
+    console.log("For:", proposalVotes.forVotes.toString());
+    console.log("Abstain:", proposalVotes.abstainVotes.toString());
+
+    if (proposalVotes.forVotes === 0n) {
+      throw new Error("Proposal has zero FOR votes after castVote.");
+    }
+
+    console.log(
+      "Vote cast successfully. " +
+        "Wait until governor.state(proposalId) is Succeeded (4), " +
+        "then rerun with REGISTRY_FLOW_PHASE=queue.",
+    );
+    return;
+  }
+
+  if (phase === "queue") {
+    const currentState = await governor.state(proposalId);
+    console.log("Current proposal state:", currentState.toString());
+    expectEqual(currentState, 4n, "Proposal must be Succeeded before queue");
+
+    console.log("Queueing proposal...");
+    await (
+      await governor.queue(
+        proposalData.targets,
+        proposalData.values,
+        proposalData.calldatas,
+        proposalData.descriptionHash,
+      )
+    ).wait();
+
+    const queuedState = await governor.state(proposalId);
+    console.log("Proposal state after queue:", queuedState.toString());
+    expectEqual(queuedState, 5n, "Proposal must be Queued after queue");
+
+    console.log(
+      "Proposal queued successfully. " +
+        "Wait until governor.state(proposalId) is still Queued (5) " +
+        "and the timelock delay has elapsed, " +
+        "then rerun with REGISTRY_FLOW_PHASE=execute.",
+    );
+    return;
+  }
+
+  if (phase === "execute") {
+    const currentState = await governor.state(proposalId);
+    console.log("Current proposal state:", currentState.toString());
+    expectEqual(currentState, 5n, "Proposal must be Queued before execution");
+
+    console.log("Executing proposal...");
+    await (
+      await governor.execute(
+        proposalData.targets,
+        proposalData.values,
+        proposalData.calldatas,
+        proposalData.descriptionHash,
+      )
+    ).wait();
+
+    const executedState = await governor.state(proposalId);
+    console.log("Proposal state after execution:", executedState.toString());
+    expectEqual(executedState, 7n, "Proposal must be Executed after execution");
+
+    const endingEntryCount = await proposalRegistry.entryCount();
+    console.log("Ending registry entry count:", endingEntryCount.toString());
+
+    const startingEntryCount = BigInt(proposalData.startingEntryCount);
+    expectEqual(
+      endingEntryCount,
+      startingEntryCount + 1n,
+      "entryCount must increase by exactly 1",
+    );
+
+    const newEntryId = endingEntryCount;
+    const entry = await proposalRegistry.getEntry(newEntryId);
+
+    console.log("\nRecorded entry:");
+    console.log("id:", entry.id.toString());
+    console.log("proposalId:", entry.proposalId.toString());
+    console.log("description:", entry.description);
+    console.log("proposer:", entry.proposer);
+    console.log("timestamp:", entry.timestamp.toString());
+
+    expectEqual(
+      entry.id,
+      newEntryId,
+      "Entry ID must match the new entry index",
+    );
+    expectEqual(
+      entry.proposalId,
+      BigInt(proposalData.recordedProposalReference),
+      "Stored proposal reference must match expected value",
+    );
+    expectEqual(
+      entry.description,
+      proposalData.entryDescription,
+      "Stored description must match the expected description",
+    );
+    expectEqual(
+      entry.proposer.toLowerCase(),
+      proposalData.entryProposer.toLowerCase(),
+      "Stored proposer must match deployer",
+    );
+
+    if (entry.timestamp <= 0n) {
+      throw new Error(
+        `Expected entry.timestamp to be > 0, got ${entry.timestamp}`,
+      );
+    }
+
+    console.log("\nProposalRegistry governance flow completed successfully.");
+    return;
+  }
+
+  throw new Error(`Unsupported phase: ${phase}`);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

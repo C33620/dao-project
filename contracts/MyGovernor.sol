@@ -33,10 +33,10 @@ contract MyGovernor is
         TimelockController _timelock
     )
         Governor("MyGovernor")
-        // votingDelay = 1 block
-        // votingPeriod = 50400 blocks (~1 week on ~12s block times)
-        // proposalThreshold = 0 tokens
-        GovernorSettings(1, 50400, 0)
+        // votingDelay = 100 blocks
+        // votingPeriod = 2900 blocks (~9h40m on ~12s block times)
+        // proposalThreshold = 1000 tokens
+        GovernorSettings(100, 2900, 1000e18)
         GovernorVotes(_token)
         // quorum = 4% of total token supply
         GovernorVotesQuorumFraction(4)

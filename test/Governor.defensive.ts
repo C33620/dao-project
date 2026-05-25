@@ -50,6 +50,15 @@ describe("Governor defensive and production-token tests", function () {
     const BoxFactory = await ethers.getContractFactory("Box");
     const box = (await BoxFactory.deploy()) as Box;
     await box.waitForDeployment();
+    await (await box.transferOwnership(await timelock.getAddress())).wait();
+
+    const ProposalRegistry = await ethers.getContractFactory(
+      "ProposalRegistry",
+    );
+    const proposalRegistry = await ProposalRegistry.deploy(
+      await timelock.getAddress(),
+    );
+    await proposalRegistry.waitForDeployment();
 
     const PROPOSER_ROLE = await timelock.PROPOSER_ROLE();
     const EXECUTOR_ROLE = await timelock.EXECUTOR_ROLE();
@@ -59,20 +68,15 @@ describe("Governor defensive and production-token tests", function () {
     await (
       await timelock.grantRole(PROPOSER_ROLE, await governor.getAddress())
     ).wait();
-
     await (
       await timelock.grantRole(EXECUTOR_ROLE, await governor.getAddress())
     ).wait();
-
     await (
       await timelock.grantRole(CANCELLER_ROLE, await governor.getAddress())
     ).wait();
-
     await (
       await timelock.renounceRole(DEFAULT_ADMIN_ROLE, deployer.address)
     ).wait();
-
-    await (await box.transferOwnership(await timelock.getAddress())).wait();
 
     const transferAmount = ethers.parseUnits("100000", 18);
     await (await token.transfer(voter1.address, transferAmount)).wait();
@@ -94,6 +98,7 @@ describe("Governor defensive and production-token tests", function () {
       timelock,
       governor,
       box,
+      proposalRegistry,
       minDelay,
       PROPOSER_ROLE,
       EXECUTOR_ROLE,
@@ -145,23 +150,79 @@ describe("Governor defensive and production-token tests", function () {
     };
   }
 
-  it("runs the full lifecycle with the production GovernanceToken", async function () {
+  async function createRegistryProposal(
+    governor: MyGovernor,
+    proposalRegistry: any,
+    ethers: any,
+    proposerAddress: string,
+    recordedProposalId = 12345n,
+  ) {
+    const descriptionText = `Registry Proposal: ${recordedProposalId.toString()}`;
+    const encodedCall = proposalRegistry.interface.encodeFunctionData(
+      "recordEntry",
+      [recordedProposalId, descriptionText, proposerAddress],
+    );
+    const description = `Proposal ${recordedProposalId}: ${descriptionText}`;
+    const descriptionHash = ethers.id(description);
+
+    const proposeTx = await governor.propose(
+      [await proposalRegistry.getAddress()],
+      [0],
+      [encodedCall],
+      description,
+    );
+    const proposeReceipt = await proposeTx.wait();
+
+    const proposalCreatedEvent = proposeReceipt!.logs
+      .map((log: any) => {
+        try {
+          return governor.interface.parseLog(log);
+        } catch {
+          return null;
+        }
+      })
+      .find((event: any) => event && event.name === "ProposalCreated");
+
+    if (!proposalCreatedEvent) {
+      throw new Error("ProposalCreated event not found");
+    }
+
+    return {
+      proposalId: proposalCreatedEvent.args.proposalId,
+      encodedCall,
+      description,
+      descriptionHash,
+      recordedProposalId,
+      descriptionText,
+      proposerAddress,
+    };
+  }
+
+  it("runs the full lifecycle with the production GovernanceToken for Box", async function () {
     const { governor, box, deployer, voter1, voter2, ethers, minDelay } =
       await deployProductionFixture();
+
+    const votingDelay = Number(await governor.votingDelay());
+    const votingPeriod = Number(await governor.votingPeriod());
 
     const { proposalId, encodedCall, descriptionHash, valueToStore } =
       await createBoxProposal(governor, box, ethers, 888n);
 
     expect(await governor.state(proposalId)).to.equal(0n); // Pending
 
-    await mineBlocks(2);
+    if (votingDelay > 0) {
+      await mineBlocks(votingDelay);
+      expect(await governor.state(proposalId)).to.equal(0n); // Still Pending
+    }
+
+    await mineBlocks(1);
     expect(await governor.state(proposalId)).to.equal(1n); // Active
 
     await (await governor.connect(deployer).castVote(proposalId, 1)).wait();
     await (await governor.connect(voter1).castVote(proposalId, 1)).wait();
     await (await governor.connect(voter2).castVote(proposalId, 1)).wait();
 
-    await mineBlocks(50401);
+    await mineBlocks(votingPeriod + 1);
     expect(await governor.state(proposalId)).to.equal(4n); // Succeeded
 
     await (
@@ -190,12 +251,107 @@ describe("Governor defensive and production-token tests", function () {
     expect(await box.retrieve()).to.equal(valueToStore);
   });
 
+  it("runs the full lifecycle with the production GovernanceToken for ProposalRegistry", async function () {
+    const {
+      governor,
+      proposalRegistry,
+      deployer,
+      voter1,
+      voter2,
+      ethers,
+      minDelay,
+    } = await deployProductionFixture();
+
+    const votingDelay = Number(await governor.votingDelay());
+    const votingPeriod = Number(await governor.votingPeriod());
+
+    const {
+      proposalId,
+      encodedCall,
+      descriptionHash,
+      recordedProposalId,
+      descriptionText,
+      proposerAddress,
+    } = await createRegistryProposal(
+      governor,
+      proposalRegistry,
+      ethers,
+      deployer.address,
+      99999n,
+    );
+
+    expect(await governor.state(proposalId)).to.equal(0n); // Pending
+
+    if (votingDelay > 0) {
+      await mineBlocks(votingDelay);
+      expect(await governor.state(proposalId)).to.equal(0n); // Still Pending
+    }
+
+    await mineBlocks(1);
+    expect(await governor.state(proposalId)).to.equal(1n); // Active
+
+    await (await governor.connect(deployer).castVote(proposalId, 1)).wait();
+    await (await governor.connect(voter1).castVote(proposalId, 1)).wait();
+    await (await governor.connect(voter2).castVote(proposalId, 1)).wait();
+
+    await mineBlocks(votingPeriod + 1);
+    expect(await governor.state(proposalId)).to.equal(4n); // Succeeded
+
+    await (
+      await governor.queue(
+        [await proposalRegistry.getAddress()],
+        [0],
+        [encodedCall],
+        descriptionHash,
+      )
+    ).wait();
+
+    expect(await governor.state(proposalId)).to.equal(5n); // Queued
+
+    await increaseTime(minDelay + 1);
+
+    await (
+      await governor.execute(
+        [await proposalRegistry.getAddress()],
+        [0],
+        [encodedCall],
+        descriptionHash,
+      )
+    ).wait();
+
+    expect(await governor.state(proposalId)).to.equal(7n); // Executed
+    expect(await proposalRegistry.getFunction("entryCount")()).to.equal(1n);
+
+    const entry = await proposalRegistry.getFunction("getEntry")(1n);
+    expect(entry.id).to.equal(1n);
+    expect(entry.proposalId).to.equal(recordedProposalId);
+    expect(entry.description).to.equal(descriptionText);
+    expect(entry.proposer).to.equal(proposerAddress);
+    expect(entry.timestamp).to.be.gt(0n);
+  });
+
   it("prevents direct Box writes after ownership is transferred to the timelock", async function () {
     const { box, deployer } = await deployProductionFixture();
 
     await expect(
       box.connect(deployer).store(123n),
     ).to.be.revertedWithCustomError(box, "OwnableUnauthorizedAccount");
+  });
+
+  it("prevents direct ProposalRegistry writes after deployment to timelock ownership", async function () {
+    const { proposalRegistry, deployer } = await deployProductionFixture();
+
+    const recordedDescription = "direct call not allowed";
+    const recordedProposer = deployer.address;
+
+    await expect(
+      proposalRegistry
+        .connect(deployer)
+        .recordEntry(999n, recordedDescription, recordedProposer),
+    ).to.be.revertedWithCustomError(
+      proposalRegistry,
+      "OwnableUnauthorizedAccount",
+    );
   });
 
   it("prevents non-admin accounts from granting timelock roles", async function () {
@@ -242,16 +398,25 @@ describe("Governor defensive and production-token tests", function () {
     const { governor, box, deployer, voter1, voter2, ethers } =
       await deployProductionFixture();
 
+    const votingDelay = Number(await governor.votingDelay());
+    const votingPeriod = Number(await governor.votingPeriod());
+
     const { proposalId, encodedCall, descriptionHash } =
       await createBoxProposal(governor, box, ethers, 1001n);
 
-    await mineBlocks(2);
+    if (votingDelay > 0) {
+      await mineBlocks(votingDelay);
+      expect(await governor.state(proposalId)).to.equal(0n); // Still Pending
+    }
+
+    await mineBlocks(1);
+    expect(await governor.state(proposalId)).to.equal(1n); // Active
 
     await (await governor.connect(deployer).castVote(proposalId, 1)).wait();
     await (await governor.connect(voter1).castVote(proposalId, 1)).wait();
     await (await governor.connect(voter2).castVote(proposalId, 1)).wait();
 
-    await mineBlocks(50401);
+    await mineBlocks(votingPeriod + 1);
     expect(await governor.state(proposalId)).to.equal(4n); // Succeeded
 
     await expect(
@@ -268,16 +433,25 @@ describe("Governor defensive and production-token tests", function () {
     const { governor, box, deployer, voter1, voter2, ethers } =
       await deployProductionFixture();
 
+    const votingDelay = Number(await governor.votingDelay());
+    const votingPeriod = Number(await governor.votingPeriod());
+
     const { proposalId, encodedCall, descriptionHash } =
       await createBoxProposal(governor, box, ethers, 1002n);
 
-    await mineBlocks(2);
+    if (votingDelay > 0) {
+      await mineBlocks(votingDelay);
+      expect(await governor.state(proposalId)).to.equal(0n); // Still Pending
+    }
+
+    await mineBlocks(1);
+    expect(await governor.state(proposalId)).to.equal(1n); // Active
 
     await (await governor.connect(deployer).castVote(proposalId, 1)).wait();
     await (await governor.connect(voter1).castVote(proposalId, 1)).wait();
     await (await governor.connect(voter2).castVote(proposalId, 1)).wait();
 
-    await mineBlocks(50401);
+    await mineBlocks(votingPeriod + 1);
     expect(await governor.state(proposalId)).to.equal(4n); // Succeeded
 
     await (
@@ -305,17 +479,24 @@ describe("Governor defensive and production-token tests", function () {
     const { governor, box, deployer, voter1, voter2, ethers } =
       await deployProductionFixture();
 
+    const votingDelay = Number(await governor.votingDelay());
+    const votingPeriod = Number(await governor.votingPeriod());
+
     const { proposalId } = await createBoxProposal(governor, box, ethers, 555n);
 
-    await mineBlocks(2);
+    if (votingDelay > 0) {
+      await mineBlocks(votingDelay);
+      expect(await governor.state(proposalId)).to.equal(0n); // Still Pending
+    }
+
+    await mineBlocks(1);
     expect(await governor.state(proposalId)).to.equal(1n); // Active
 
     await (await governor.connect(deployer).castVote(proposalId, 0)).wait();
     await (await governor.connect(voter1).castVote(proposalId, 0)).wait();
     await (await governor.connect(voter2).castVote(proposalId, 0)).wait();
 
-    await mineBlocks(50401);
-
+    await mineBlocks(votingPeriod + 1);
     expect(await governor.state(proposalId)).to.equal(3n); // Defeated
   });
 
@@ -346,6 +527,9 @@ describe("Governor defensive and production-token tests", function () {
     const { governor, box, deployer, voter1, voter2, ethers } =
       await deployProductionFixture();
 
+    const votingDelay = Number(await governor.votingDelay());
+    const votingPeriod = Number(await governor.votingPeriod());
+
     const { proposalId } = await createBoxProposal(
       governor,
       box,
@@ -353,13 +537,19 @@ describe("Governor defensive and production-token tests", function () {
       4242n,
     );
 
-    await mineBlocks(2);
+    if (votingDelay > 0) {
+      await mineBlocks(votingDelay);
+      expect(await governor.state(proposalId)).to.equal(0n); // Still Pending
+    }
+
+    await mineBlocks(1);
+    expect(await governor.state(proposalId)).to.equal(1n); // Active
 
     await (await governor.connect(deployer).castVote(proposalId, 1)).wait();
     await (await governor.connect(voter1).castVote(proposalId, 1)).wait();
     await (await governor.connect(voter2).castVote(proposalId, 1)).wait();
 
-    await mineBlocks(50401);
+    await mineBlocks(votingPeriod + 1);
     expect(await governor.state(proposalId)).to.equal(4n); // Succeeded
 
     expect(await governor.proposalNeedsQueuing(proposalId)).to.equal(true);

@@ -103,13 +103,23 @@ describe("DAO Governance Flow", function () {
     const parsedLog = governor.interface.parseLog(proposalCreatedLog);
     const proposalId = parsedLog!.args.proposalId;
 
+    const votingDelay = Number(await governor.votingDelay());
+    const votingPeriod = Number(await governor.votingPeriod());
+
+    expect(await governor.state(proposalId)).to.equal(0n); // Pending
+
+    if (votingDelay > 0) {
+      await mineBlocks(provider, votingDelay);
+      expect(await governor.state(proposalId)).to.equal(0n); // Still Pending
+    }
+
     await mineBlocks(provider, 1);
+    expect(await governor.state(proposalId)).to.equal(1n); // Active
 
     await (await governor.castVote(proposalId, 1)).wait();
 
-    await mineBlocks(provider, 50401);
-
-    expect(await governor.state(proposalId)).to.equal(4n);
+    await mineBlocks(provider, votingPeriod + 1);
+    expect(await governor.state(proposalId)).to.equal(4n); // Succeeded
 
     const descriptionHash = ethers.id(description);
 

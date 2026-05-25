@@ -2,11 +2,44 @@ import hre from "hardhat";
 import fs from "node:fs";
 import path from "node:path";
 
+type DeploymentFile = {
+  network: string;
+  chainId: number;
+  deployer: string;
+  governanceToken: string;
+  timelock: string;
+  governor: string;
+  box: string;
+  proposalRegistry: string;
+  minDelay: number;
+  deployedAt: string;
+};
+
+function getDeploymentFilePath(networkName: string) {
+  const deploymentsDir = path.join(process.cwd(), "deployments");
+  fs.mkdirSync(deploymentsDir, { recursive: true });
+  return path.join(deploymentsDir, `${networkName}.json`);
+}
+
 async function main() {
-  const { ethers } = await hre.network.getOrCreate();
+  const connection = await hre.network.getOrCreate();
+  const { ethers } = connection;
+  const provider = connection.provider;
   const [deployer] = await ethers.getSigners();
 
+  const chainIdHex = (await provider.request({
+    method: "eth_chainId",
+    params: [],
+  })) as string;
+  const chainId = Number(chainIdHex);
+
+  const networkName =
+    process.env.HARDHAT_NETWORK ??
+    (chainId === 31337 ? "localhost" : `chain-${chainId}`);
+
   console.log("Deploying contracts with:", deployer.address);
+  console.log("Network:", networkName);
+  console.log("Chain ID:", chainId);
 
   const MIN_DELAY = 3600;
   const proposers: string[] = [];
@@ -14,6 +47,14 @@ async function main() {
   const admin = deployer.address;
 
   const GovernanceToken = await ethers.getContractFactory("GovernanceToken");
+  // Initial token supply is minted to the deployer at deployment time.
+  //
+  // Planned distribution to users will be handled
+  // manually later, once recipient addresses are finalized.
+  //
+  // As outlined in the project checklist, privileged ownership / control
+  // is intended to move to the timelock through governance as the setup
+  // is finalized on testnet.
   const governanceToken = await GovernanceToken.deploy(deployer.address);
   await governanceToken.waitForDeployment();
   const governanceTokenAddress = await governanceToken.getAddress();
@@ -45,6 +86,12 @@ async function main() {
   const boxAddress = await box.getAddress();
   console.log("Box deployed to:", boxAddress);
 
+  const ProposalRegistry = await ethers.getContractFactory("ProposalRegistry");
+  const proposalRegistry = await ProposalRegistry.deploy(timelockAddress);
+  await proposalRegistry.waitForDeployment();
+  const proposalRegistryAddress = await proposalRegistry.getAddress();
+  console.log("ProposalRegistry deployed to:", proposalRegistryAddress);
+
   const proposerRole = await timelock.PROPOSER_ROLE();
   const executorRole = await timelock.EXECUTOR_ROLE();
   const adminRole = await timelock.DEFAULT_ADMIN_ROLE();
@@ -56,31 +103,53 @@ async function main() {
   console.log("Transferring Box ownership to Timelock...");
   await (await box.transferOwnership(timelockAddress)).wait();
 
+  const boxOwner = await box.owner();
+  if (boxOwner.toLowerCase() !== timelockAddress.toLowerCase()) {
+    throw new Error(
+      `Box owner mismatch. Expected ${timelockAddress}, got ${boxOwner}`,
+    );
+  }
+
+  const registryOwner = await proposalRegistry.owner();
+  if (registryOwner.toLowerCase() !== timelockAddress.toLowerCase()) {
+    throw new Error(
+      `ProposalRegistry owner mismatch. Expected ${timelockAddress}, got ${registryOwner}`,
+    );
+  }
+
   console.log("Renouncing deployer admin role...");
   await (await timelock.renounceRole(adminRole, deployer.address)).wait();
 
-  const deploymentData = {
+  const stillHasAdminRole = await timelock.hasRole(adminRole, deployer.address);
+  if (stillHasAdminRole) {
+    throw new Error("Deployer still has admin role after renounceRole.");
+  }
+
+  const deploymentData: DeploymentFile = {
+    network: networkName,
+    chainId,
     deployer: deployer.address,
     governanceToken: governanceTokenAddress,
     timelock: timelockAddress,
     governor: governorAddress,
     box: boxAddress,
+    proposalRegistry: proposalRegistryAddress,
     minDelay: MIN_DELAY,
     deployedAt: new Date().toISOString(),
   };
 
-  const deploymentsDir = path.join(process.cwd(), "deployments");
-  fs.mkdirSync(deploymentsDir, { recursive: true });
-
-  const filePath = path.join(deploymentsDir, "localhost.json");
+  const filePath = getDeploymentFilePath(networkName);
   fs.writeFileSync(filePath, JSON.stringify(deploymentData, null, 2));
 
   console.log(`\nDeployment data saved to: ${filePath}`);
   console.log("\nDeployment complete:");
+  console.log("Network:", networkName);
+  console.log("Chain ID:", chainId);
   console.log("GovernanceToken:", governanceTokenAddress);
   console.log("Timelock:", timelockAddress);
   console.log("Governor:", governorAddress);
   console.log("Box:", boxAddress);
+  console.log("ProposalRegistry:", proposalRegistryAddress);
 }
 
 main().catch((error) => {
