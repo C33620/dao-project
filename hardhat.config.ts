@@ -30,6 +30,10 @@ export default defineConfig({
     },
   },
   networks: {
+    hardhat: {
+      type: "edr-simulated",
+      chainType: "l1",
+    },
     hardhatMainnet: {
       type: "edr-simulated",
       chainType: "l1",
@@ -42,6 +46,7 @@ export default defineConfig({
       type: "http",
       chainType: "l1",
       url: configVariable("SEPOLIA_RPC_URL"),
+      chainId: 11155111,
       accounts: [configVariable("SEPOLIA_PRIVATE_KEY")],
     },
   },

@@ -17,17 +17,10 @@ contract GovernanceToken is ERC20Votes, Ownable {
     constructor(
         address initialOwner
     )
-        ERC20("MyDAOGovernanceToken", "MDGT")
-        EIP712("MyDAOGovernanceToken", "1")
+        ERC20("KyotoTechMeetupToken", "KTM")
+        EIP712("KyotoTechMeetupToken", "1")
         Ownable(initialOwner)
     {
         _mint(initialOwner, INITIAL_SUPPLY);
     }
-
-    /// @notice Mints new governance tokens to a recipient.
-    /// @param to The address receiving the minted tokens.
-    /// @param amount The number of tokens to mint.
-    function mint(address to, uint256 amount) external onlyOwner {
-        _mint(to, amount);
-    } // While building only then for stronger governance safety, this power should be transferred to the timelock or removed entirely.
 }

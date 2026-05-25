@@ -41,20 +41,12 @@ async function main() {
   console.log("Network:", networkName);
   console.log("Chain ID:", chainId);
 
-  const MIN_DELAY = 3600;
+  const MIN_DELAY = 64800; // 18 hours
   const proposers: string[] = [];
-  const executors: string[] = [];
-  const admin = deployer.address;
+  const executors: string[] = [ethers.ZeroAddress]; // open execution
+  const admin = deployer.address; // temporary admin for setup only
 
   const GovernanceToken = await ethers.getContractFactory("GovernanceToken");
-  // Initial token supply is minted to the deployer at deployment time.
-  //
-  // Planned distribution to users will be handled
-  // manually later, once recipient addresses are finalized.
-  //
-  // As outlined in the project checklist, privileged ownership / control
-  // is intended to move to the timelock through governance as the setup
-  // is finalized on testnet.
   const governanceToken = await GovernanceToken.deploy(deployer.address);
   await governanceToken.waitForDeployment();
   const governanceTokenAddress = await governanceToken.getAddress();
@@ -93,12 +85,39 @@ async function main() {
   console.log("ProposalRegistry deployed to:", proposalRegistryAddress);
 
   const proposerRole = await timelock.PROPOSER_ROLE();
+  const cancellerRole = await timelock.CANCELLER_ROLE();
   const executorRole = await timelock.EXECUTOR_ROLE();
   const adminRole = await timelock.DEFAULT_ADMIN_ROLE();
 
-  console.log("Granting roles...");
+  console.log("Granting timelock roles to Governor...");
   await (await timelock.grantRole(proposerRole, governorAddress)).wait();
-  await (await timelock.grantRole(executorRole, ethers.ZeroAddress)).wait();
+  await (await timelock.grantRole(cancellerRole, governorAddress)).wait();
+
+  console.log("Verifying timelock role assignments...");
+  const governorHasProposerRole = await timelock.hasRole(
+    proposerRole,
+    governorAddress,
+  );
+  const governorHasCancellerRole = await timelock.hasRole(
+    cancellerRole,
+    governorAddress,
+  );
+  const zeroAddressHasExecutorRole = await timelock.hasRole(
+    executorRole,
+    ethers.ZeroAddress,
+  );
+
+  if (!governorHasProposerRole) {
+    throw new Error("Governor was not granted PROPOSER_ROLE.");
+  }
+
+  if (!governorHasCancellerRole) {
+    throw new Error("Governor was not granted CANCELLER_ROLE.");
+  }
+
+  if (!zeroAddressHasExecutorRole) {
+    throw new Error("EXECUTOR_ROLE is not open to address(0).");
+  }
 
   console.log("Transferring Box ownership to Timelock...");
   await (await box.transferOwnership(timelockAddress)).wait();

@@ -37,16 +37,24 @@ async function increaseTime(provider: any, seconds: number) {
   });
 }
 
-function getNetworkName() {
-  return process.env.HARDHAT_NETWORK ?? "localhost";
+async function getNetworkName(provider: any): Promise<string> {
+  const chainIdHex = await provider.request({
+    method: "eth_chainId",
+    params: [],
+  });
+
+  const chainId = Number(chainIdHex);
+
+  if (chainId === 31337) return "localhost";
+  return `chain-${chainId}`;
 }
 
 function isLocalNetwork(networkName: string) {
   return networkName === "localhost" || networkName === "hardhat";
 }
 
-function loadDeployment(): DeploymentFile {
-  const networkName = getNetworkName();
+async function loadDeployment(provider: any): Promise<DeploymentFile> {
+  const networkName = await getNetworkName(provider);
   const filePath = path.join(
     process.cwd(),
     "deployments",
@@ -79,6 +87,7 @@ function getPhase(networkName: string): Phase {
   if (!isLocalNetwork(networkName)) {
     return "propose";
   }
+
   return "auto";
 }
 
@@ -114,9 +123,9 @@ async function main() {
   const provider = connection.provider;
   const [deployer] = await ethers.getSigners();
 
-  const networkName = getNetworkName();
+  const networkName = await getNetworkName(provider);
   const phase = getPhase(networkName);
-  const deployment = loadDeployment();
+  const deployment = await loadDeployment(provider);
 
   console.log("Network:", networkName);
   console.log("Phase:", phase);
@@ -164,6 +173,20 @@ async function main() {
   console.log("Voting delay:", votingDelay);
   console.log("Voting period:", votingPeriod);
 
+  // ✅ new: add threshold check before propose
+  const proposalThreshold = await governor.proposalThreshold();
+  console.log("Proposal threshold:", proposalThreshold.toString());
+  console.log("Proposer votes:", votes.toString());
+  console.log("Proposer address:", deployer.address);
+
+  if (votes < proposalThreshold) {
+    throw new Error(
+      `Not enough votes to propose. Threshold=${proposalThreshold.toString()} votes=${votes.toString()} proposer=${
+        deployer.address
+      }`,
+    );
+  }
+
   const newValue = 77;
   const description = "Proposal #1: Store 77 in Box";
   const descriptionHash = ethers.id(description);
@@ -180,6 +203,7 @@ async function main() {
     console.log("Starting Box value:", startingValue.toString());
 
     console.log("\nCreating proposal...");
+
     const proposeTx = await governor.propose(
       targets,
       values,

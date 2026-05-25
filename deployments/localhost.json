@@ -7,6 +7,6 @@
   "governor": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
   "box": "0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9",
   "proposalRegistry": "0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9",
-  "minDelay": 3600,
-  "deployedAt": "2026-05-25T00:51:27.073Z"
+  "minDelay": 64800,
+  "deployedAt": "2026-05-25T10:32:01.499Z"
 }

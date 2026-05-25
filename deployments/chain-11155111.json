@@ -1,0 +1,12 @@
+{
+  "network": "chain-11155111",
+  "chainId": 11155111,
+  "deployer": "0x4aB1Ae0c142EA8AA36b95e4227263Fac8A53508E",
+  "governanceToken": "0x5d9A21fE5f8314D8980e6aC1D1AEBFa8185ECFC8",
+  "timelock": "0x856D887dd70EA2bFc66497B803B7f70fe20fF31b",
+  "governor": "0x5e550C752F8d3Ea16B327877538C62a8A3E9AC6c",
+  "box": "0x25f466ee1054787A328AFF77758d3C8011d3a19F",
+  "proposalRegistry": "0x139DeCfEB250437028D233Ac7c8FC354771f1f22",
+  "minDelay": 64800,
+  "deployedAt": "2026-05-25T10:09:27.488Z"
+}
