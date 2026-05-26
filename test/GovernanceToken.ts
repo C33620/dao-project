@@ -29,15 +29,12 @@ describe("GovernanceToken", function () {
     expect(await token.owner()).to.equal(owner.address);
   });
 
-  it("should allow only the owner to mint", async function () {
-    const { ethers, token, addr1 } = await deployGovernanceTokenFixture();
+  it("should not expose a public mint function", async function () {
+    const { token } = await deployGovernanceTokenFixture();
 
-    await token.mint(addr1.address, 1000n);
-    expect(await token.balanceOf(addr1.address)).to.equal(1000n);
+    const hasMint = token.interface.hasFunction("mint");
 
-    await expect(
-      token.connect(addr1).mint(addr1.address, 1000n),
-    ).to.be.revertedWithCustomError(token, "OwnableUnauthorizedAccount");
+    expect(hasMint).to.equal(false);
   });
 
   it("should have zero voting power before delegation", async function () {

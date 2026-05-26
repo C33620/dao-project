@@ -499,28 +499,25 @@ describe("Governor defensive and production-token tests", function () {
     await mineBlocks(votingPeriod + 1);
     expect(await governor.state(proposalId)).to.equal(3n); // Defeated
   });
-
-  it("allows the owner to mint GovernanceToken before any future ownership transfer", async function () {
-    const { token, deployer, attacker, ethers } =
+  it("keeps the fixed total GovernanceToken supply after distribution", async function () {
+    const { token, deployer, voter1, voter2, ethers } =
       await deployProductionFixture();
 
-    const mintAmount = ethers.parseUnits("1000", 18);
-    await (
-      await token.connect(deployer).mint(attacker.address, mintAmount)
-    ).wait();
+    const totalSupply = await token.totalSupply();
+    const transferAmount = ethers.parseUnits("100000", 18);
 
-    expect(await token.balanceOf(attacker.address)).to.equal(mintAmount);
+    expect(totalSupply).to.equal(ethers.parseUnits("1000000", 18));
+    expect(await token.balanceOf(deployer.address)).to.equal(
+      totalSupply - transferAmount - transferAmount,
+    );
+    expect(await token.balanceOf(voter1.address)).to.equal(transferAmount);
+    expect(await token.balanceOf(voter2.address)).to.equal(transferAmount);
   });
 
-  it("prevents non-owners from minting GovernanceToken", async function () {
-    const { token, attacker } = await deployProductionFixture();
+  it("does not expose a public mint function", async function () {
+    const { token } = await deployProductionFixture();
 
-    const { ethers } = await network.getOrCreate();
-    const mintAmount = ethers.parseUnits("1000", 18);
-
-    await expect(
-      token.connect(attacker).mint(attacker.address, mintAmount),
-    ).to.be.revertedWithCustomError(token, "OwnableUnauthorizedAccount");
+    expect((token as any).mint).to.equal(undefined);
   });
 
   it("exercises proposalNeedsQueuing by checking a succeeded proposal before queue", async function () {
