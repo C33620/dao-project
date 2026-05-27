@@ -1,76 +1,48 @@
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
-import { StatusBadge } from "@/components/ui/status-badge";
+import { getRecentGovernanceActivity } from "@/lib/services/proposals";
 
-const activityGroups = [
-  {
-    date: "Today",
-    items: [
-      {
-        title: "Proposal 101 reached quorum",
-        detail:
-          "Placeholder governance milestone recorded in the activity feed.",
-        tone: "success" as const,
-      },
-      {
-        title: "Execution queue updated",
-        detail:
-          "A queued action placeholder is now waiting for timelock completion.",
-        tone: "pending" as const,
-      },
-    ],
-  },
-  {
-    date: "Earlier this week",
-    items: [
-      {
-        title: "Delegate profile reviewed",
-        detail: "Mock-safe account and participation metadata refreshed.",
-        tone: "info" as const,
-      },
-      {
-        title: "Governance settings changed",
-        detail:
-          "Notification preferences placeholder updated for this workspace.",
-        tone: "warning" as const,
-      },
-    ],
-  },
-];
+export default async function HistoryPage() {
+  const activity = await getRecentGovernanceActivity();
 
-export default function HistoryPage() {
   return (
     <PageShell
       title="History"
-      description="Chronological governance activity with clear rhythm and empty-safe grouping."
+      description="A chronological view of the most recent activity in your workspace."
     >
-      <SectionCard
-        title="Activity feed"
-        description="Recent protocol and user-facing governance events."
-      >
-        <div className="activity-groups">
-          {activityGroups.map((group) => (
-            <section key={group.date} className="activity-group">
-              <h2>{group.date}</h2>
-
-              <div className="activity-list">
-                {group.items.map((item) => (
-                  <article key={item.title} className="activity-item">
-                    <div className="activity-item__rail" aria-hidden="true" />
-                    <div className="activity-item__content">
-                      <div className="activity-item__top">
-                        <h3>{item.title}</h3>
-                        <StatusBadge label="Recorded" tone={item.tone} />
-                      </div>
-                      <p>{item.detail}</p>
+      <div className="page-shell__content">
+        <SectionCard
+          title="Recent activity"
+          description="The newest updates appear first so you can scan what changed."
+        >
+          <div className="activity-feed">
+            {activity.length > 0 ? (
+              activity.map((item) => (
+                <article key={item.id} className="activity-feed__item">
+                  <div className="activity-feed__marker" aria-hidden="true" />
+                  <div className="activity-feed__content">
+                    <div className="activity-feed__topline">
+                      <h3>{item.title}</h3>
+                      <span>{item.occurredAt}</span>
                     </div>
-                  </article>
-                ))}
+                    <p>{item.description}</p>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="empty-state empty-state--compact">
+                <div className="empty-state__icon" aria-hidden="true">
+                  ≣
+                </div>
+                <h2>No history yet</h2>
+                <p>
+                  Recent activity will appear here once actions are recorded.
+                </p>
               </div>
-            </section>
-          ))}
-        </div>
-      </SectionCard>
+            )}
+          </div>
+        </SectionCard>
+      </div>
     </PageShell>
   );
 }

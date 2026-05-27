@@ -20,7 +20,7 @@ export function SectionCard({
 }: SectionCardProps) {
   return (
     <section className={cn("section-card", className)}>
-      {title || description || action ? (
+      {(title || description || action) && (
         <header className="section-card__header">
           <div>
             {title ? <h2 className="section-card__title">{title}</h2> : null}
@@ -30,7 +30,7 @@ export function SectionCard({
           </div>
           {action ? <div className="section-card__action">{action}</div> : null}
         </header>
-      ) : null}
+      )}
 
       <div className={cn("section-card__content", contentClassName)}>
         {children}

@@ -1,18 +1,16 @@
-import {
-  ProposalCard,
-  ProposalCardData,
-} from "@/components/governance/proposal-card";
+import { ProposalCard } from "@/components/governance/proposal-card";
+import type { ProposalSummary } from "@/types/governance";
 
 type ProposalListProps = {
-  proposals: ProposalCardData[];
+  proposals: ProposalSummary[];
   emptyTitle?: string;
   emptyDescription?: string;
 };
 
 export function ProposalList({
   proposals,
-  emptyTitle = "No proposals yet",
-  emptyDescription = "New proposals will appear here once governance data is connected.",
+  emptyTitle = "Nothing to review right now",
+  emptyDescription = "When new items are ready for you, they will appear here.",
 }: ProposalListProps) {
   if (proposals.length === 0) {
     return (

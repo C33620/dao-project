@@ -27,12 +27,12 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
             </span>
             <span>
               <strong>GovBoard</strong>
-              <small>DAO governance</small>
+              <small>Clear decisions, calm workflow</small>
             </span>
           </Link>
         </div>
 
-        <nav className="app-sidebar__nav" aria-label="Primary">
+        <nav className="app-sidebar__nav" aria-label="Primary navigation">
           {appNav.map((item) => {
             const isActive =
               pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -58,13 +58,13 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
 
         <div className="app-sidebar__footer">
           <div className="sidebar-note">
-            <p className="sidebar-note__eyebrow">Workspace</p>
+            <p className="sidebar-note__eyebrow">Workspace note</p>
             <p className="sidebar-note__title">
-              Protocol operations are in placeholder mode.
+              Start with the clearest next step.
             </p>
             <p className="sidebar-note__text">
-              UI structure is ready for later wallet, proposal, and execution
-              wiring.
+              Review open items, follow recent activity, and keep the workflow
+              easy to scan from any page.
             </p>
           </div>
         </div>

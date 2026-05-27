@@ -5,74 +5,74 @@ export default function SettingsPage() {
   return (
     <PageShell
       title="Settings"
-      description="Read-only placeholder settings designed for future auth and preference wiring."
+      description="View account details, session status, and a few simple preferences."
     >
-      <div className="settings-layout">
+      <div className="settings-stack">
         <SectionCard
-          title="Profile and account"
-          description="Account state preview only."
+          title="Account"
+          description="Basic account information shown in this preview."
         >
-          <dl className="key-value-grid">
-            <div>
-              <dt>Display name</dt>
-              <dd>Delegate Preview</dd>
+          <div className="settings-list">
+            <div className="settings-row settings-row--stacked">
+              <div>
+                <span>Name</span>
+                <p className="settings-row__hint">
+                  This name can be shown in the workspace once connected.
+                </p>
+              </div>
+              <input type="text" value="Preview account" readOnly />
             </div>
-            <div>
-              <dt>Email</dt>
-              <dd>pending-auth@example.com</dd>
+
+            <div className="settings-row settings-row--stacked">
+              <div>
+                <span>Wallet status</span>
+                <p className="settings-row__hint">
+                  Connection is not active in the preview environment.
+                </p>
+              </div>
+              <input type="text" value="Not connected" readOnly />
             </div>
-            <div>
-              <dt>Access mode</dt>
-              <dd>Mock-safe local shell</dd>
-            </div>
-            <div>
-              <dt>Wallet link</dt>
-              <dd>Not connected</dd>
-            </div>
-          </dl>
+          </div>
         </SectionCard>
 
         <SectionCard
-          title="App preferences"
-          description="Read-only UI controls for later wiring."
+          title="Preferences"
+          description="A few interface defaults for this preview workspace."
         >
           <div className="settings-list">
             <label className="settings-row">
-              <span>Compact proposal cards</span>
-              <input type="checkbox" checked readOnly />
+              <div>
+                <span>Show recent activity first</span>
+                <p className="settings-row__hint">
+                  Keep the newest updates at the top of history views.
+                </p>
+              </div>
+              <input type="checkbox" defaultChecked />
             </label>
+
             <label className="settings-row">
-              <span>Show activity summaries</span>
-              <input type="checkbox" checked readOnly />
-            </label>
-            <label className="settings-row">
-              <span>Enable desktop alerts</span>
-              <input type="checkbox" readOnly />
+              <div>
+                <span>Use compact status labels</span>
+                <p className="settings-row__hint">
+                  Reduce extra wording in badges and small status surfaces.
+                </p>
+              </div>
+              <input type="checkbox" defaultChecked />
             </label>
           </div>
         </SectionCard>
 
         <SectionCard
-          title="Governance preferences"
-          description="Future-facing participation settings."
+          title="Session"
+          description="Actions related to sign-in and access state."
         >
-          <div className="settings-list">
-            <label className="settings-row">
-              <span>Default vote mode</span>
-              <input type="text" value="Manual review" readOnly />
-            </label>
-            <label className="settings-row">
-              <span>Proposal digest cadence</span>
-              <input type="text" value="Weekly summary" readOnly />
-            </label>
-            <label className="settings-row">
-              <span>Execution readiness alerts</span>
-              <input
-                type="text"
-                value="Enabled for queued proposals"
-                readOnly
-              />
-            </label>
+          <div className="settings-actions">
+            <button type="button" className="button button--primary">
+              Sign in securely
+            </button>
+            <button type="button" className="button button--secondary">
+              Sign out
+            </button>
           </div>
         </SectionCard>
       </div>

@@ -1,12 +1,5 @@
 import { cn } from "@/lib/utils/cn";
-
-export type StatusTone =
-  | "default"
-  | "info"
-  | "success"
-  | "warning"
-  | "danger"
-  | "pending";
+import type { StatusTone } from "@/types/governance";
 
 type StatusBadgeProps = {
   label: string;
@@ -22,7 +15,7 @@ export function StatusBadge({
   return (
     <span className={cn("status-badge", `status-badge--${tone}`, className)}>
       <span aria-hidden="true" className="status-badge__dot" />
-      {label}
+      <span className="status-badge__label">{label}</span>
     </span>
   );
 }

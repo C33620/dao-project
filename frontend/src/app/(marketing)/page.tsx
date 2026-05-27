@@ -3,24 +3,54 @@ import Link from "next/link";
 export default function LandingPage() {
   return (
     <main className="landing-page">
-      <section className="landing-hero">
+      <header className="landing-nav">
+        <Link
+          href="/"
+          className="landing-nav__brand"
+          aria-label="GovBoard home"
+        >
+          <span className="landing-nav__mark" aria-hidden="true">
+            ◧
+          </span>
+          <span className="landing-nav__brand-text">
+            <strong>GovBoard</strong>
+            <small>Clear decisions, calm workflow</small>
+          </span>
+        </Link>
+
+        <nav className="landing-nav__links" aria-label="Primary">
+          <a href="#how-it-works" className="landing-nav__link">
+            How it works
+          </a>
+          <a href="#why-govboard" className="landing-nav__link">
+            Why GovBoard
+          </a>
+          <Link href="/app/dashboard" className="button button--primary">
+            Get the app
+          </Link>
+        </nav>
+      </header>
+
+      <section className="landing-hero landing-hero--open">
         <div className="landing-hero__content">
           <p className="landing-hero__eyebrow">
-            Governance operations, clearly structured
+            A simpler way to move decisions forward
           </p>
-          <h1>Run DAO governance with a product-grade operating surface.</h1>
+          <h1>
+            Review, track, and finalize important decisions in one calm
+            workspace.
+          </h1>
           <p className="landing-hero__lede">
-            GovBoard gives delegates and contributors a focused place to review
-            proposals, monitor voting context, and prepare execution steps
-            without burying the protocol in noisy admin tooling.
+            GovBoard helps teams stay on top of proposals, recent activity, and
+            next steps without forcing every user to think like an operator.
           </p>
 
           <div className="landing-hero__actions">
             <Link href="/app/dashboard" className="button button--primary">
-              Open dashboard
+              Get the app
             </Link>
             <Link href="/app/proposals" className="button button--secondary">
-              Browse proposals
+              View proposals
             </Link>
           </div>
         </div>
@@ -28,20 +58,21 @@ export default function LandingPage() {
         <div className="landing-hero__panel" aria-hidden="true">
           <div className="landing-preview-card">
             <div className="landing-preview-card__header">
-              <span>Governance health</span>
-              <strong>Stable</strong>
+              <span>Today</span>
+              <strong>Focused</strong>
             </div>
+
             <div className="landing-preview-card__stats">
               <div>
-                <small>Open proposals</small>
+                <small>Needs review</small>
                 <strong>04</strong>
               </div>
               <div>
-                <small>Participation</small>
-                <strong>78%</strong>
+                <small>Recently completed</small>
+                <strong>12</strong>
               </div>
               <div>
-                <small>Queued actions</small>
+                <small>Ready soon</small>
                 <strong>02</strong>
               </div>
             </div>
@@ -49,37 +80,77 @@ export default function LandingPage() {
         </div>
       </section>
 
-      <section className="landing-section">
+      <section className="landing-section" id="why-govboard">
         <div className="landing-section__intro">
-          <p className="section-kicker">What it does</p>
-          <h2>A governance shell built for clarity before complexity.</h2>
+          <p className="section-kicker">Why GovBoard</p>
+          <h2>Built for clarity before complexity.</h2>
           <p>
-            This interface is designed to make proposal review, execution
-            readiness, and protocol activity easier to scan today while staying
-            implementation-friendly for real auth, wallet, and backend wiring
-            later.
+            GovBoard gives people a cleaner way to review what matters now,
+            understand progress at a glance, and move work forward with less
+            friction.
           </p>
         </div>
 
         <div className="benefit-grid">
           <article className="benefit-card">
-            <h3>Clear proposal review</h3>
+            <h3>Start with what matters</h3>
             <p>
-              Consistent cards, detail views, metadata rows, and empty-safe
-              states.
+              See the items that need attention first instead of sorting through
+              a dense operations view.
             </p>
           </article>
+
           <article className="benefit-card">
-            <h3>Operator-friendly structure</h3>
+            <h3>Keep progress readable</h3>
             <p>
-              Dashboard, history, execution, and settings use the same reusable
-              layout system.
+              Follow recent activity, current status, and next steps in a layout
+              that stays easy to scan.
             </p>
           </article>
+
           <article className="benefit-card">
-            <h3>Ready for real wiring</h3>
+            <h3>Work in one place</h3>
             <p>
-              Mock-safe UI patterns now, predictable integration points later.
+              Move from review to follow-through in a single product surface
+              designed to feel calm and credible.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <section className="landing-section" id="how-it-works">
+        <div className="landing-section__intro">
+          <p className="section-kicker">How it works</p>
+          <h2>A lighter workflow for everyday use.</h2>
+          <p>
+            Open the app, review what needs your attention, check recent
+            outcomes, and move the right items forward without digging through
+            unnecessary noise.
+          </p>
+        </div>
+
+        <div className="benefit-grid">
+          <article className="benefit-card">
+            <h3>1. Open your workspace</h3>
+            <p>
+              Start from a simple home view with your account status, recent
+              activity, and next actions.
+            </p>
+          </article>
+
+          <article className="benefit-card">
+            <h3>2. Review key items</h3>
+            <p>
+              Focus on what needs a decision now, with details available when
+              you need them.
+            </p>
+          </article>
+
+          <article className="benefit-card">
+            <h3>3. Keep things moving</h3>
+            <p>
+              Check what is ready next, follow progress clearly, and keep the
+              process easy to understand.
             </p>
           </article>
         </div>
@@ -87,18 +158,16 @@ export default function LandingPage() {
 
       <section className="landing-cta">
         <div>
-          <p className="section-kicker">Product preview</p>
-          <h2>
-            Move from placeholder scaffolding to a credible governance surface.
-          </h2>
+          <p className="section-kicker">Get started</p>
+          <h2>Open a cleaner interface for decisions and follow-through.</h2>
           <p>
-            Enter the application shell to review dashboard structure, reusable
-            proposal components, and execution-focused placeholder views.
+            Explore the workspace to see a calmer, more readable product
+            direction for review, progress tracking, and completion.
           </p>
         </div>
 
         <Link href="/app/dashboard" className="button button--primary">
-          Enter app workspace
+          Get the app
         </Link>
       </section>
     </main>

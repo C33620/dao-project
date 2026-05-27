@@ -1,137 +1,156 @@
-import type { ProposalCardData } from "@/components/governance/proposal-card";
 import { ProposalList } from "@/components/governance/proposal-list";
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
-import { StatusBadge } from "@/components/ui/status-badge";
 import { WalletStatus } from "@/components/wallet/wallet-status";
+import {
+  getDashboardSummary,
+  getProposals,
+  getRecentGovernanceActivity,
+} from "@/lib/services/proposals";
 import Link from "next/link";
 
-const recentProposals: ProposalCardData[] = [
-  {
-    id: "101",
-    title: "Refresh delegate incentives framework",
-    excerpt:
-      "Placeholder proposal summarizing a routine governance compensation update.",
-    status: "Active",
-    tone: "info",
-    category: "Operations",
-    author: "Core Council",
-    createdAt: "May 22",
-    votingWindow: "4 days left",
-  },
-  {
-    id: "102",
-    title: "Update timelock execution thresholds",
-    excerpt:
-      "Placeholder structure for a protocol configuration proposal with review notes.",
-    status: "Queued",
-    tone: "pending",
-    category: "Protocol",
-    author: "Risk Working Group",
-    createdAt: "May 19",
-    votingWindow: "Queued",
-  },
-];
+export default async function DashboardPage() {
+  const [summary, proposalsNeedingReview, recentActivity] = await Promise.all([
+    getDashboardSummary(),
+    getProposals("active"),
+    getRecentGovernanceActivity(),
+  ]);
 
-export default function DashboardPage() {
+  const historyPreview = recentActivity.slice(0, 4);
+
   return (
     <PageShell
-      title="Dashboard"
-      description="A placeholder governance overview with reusable cards and structured hierarchy."
-      actions={
-        <div className="button-row">
-          <Link href="/app/proposals" className="button button--secondary">
-            Review proposals
-          </Link>
-          <Link href="/app/execute" className="button button--primary">
-            Open execute queue
-          </Link>
-        </div>
-      }
+      title="Home"
+      description="Start here with your account status, next actions, and recent activity."
     >
-      <div className="dashboard-grid">
-        <WalletStatus />
+      <div className="dashboard-stack">
+        <section className="dashboard-hero">
+          <div className="dashboard-hero__content">
+            <p className="section-kicker">Start here</p>
+            <h2 className="dashboard-hero__title">
+              Review what matters now and keep work moving.
+            </h2>
+            <p className="dashboard-hero__description">
+              Use this space to enter your name, connect securely when ready,
+              and jump straight into the next items that need your attention.
+            </p>
 
-        <SectionCard
-          title="Voting power overview"
-          description="Mock-safe participation summary."
-        >
-          <div className="metric-panel">
-            <div>
-              <span className="metric-panel__label">Current voting power</span>
-              <strong className="metric-panel__value">24,500 GOV</strong>
-            </div>
-            <StatusBadge label="Delegated" tone="success" />
+            <form className="dashboard-name-form">
+              <label className="dashboard-name-form__field">
+                <span>Your name</span>
+                <input
+                  type="text"
+                  name="displayName"
+                  placeholder="Enter your name"
+                />
+              </label>
+
+              <div className="dashboard-name-form__actions">
+                <button type="button" className="button button--primary">
+                  Sign in securely
+                </button>
+                <button type="button" className="button button--secondary">
+                  Sign out
+                </button>
+              </div>
+            </form>
           </div>
 
-          <dl className="metric-grid">
-            <div>
-              <dt>Quorum reference</dt>
-              <dd>400,000 GOV</dd>
-            </div>
-            <div>
-              <dt>Your share</dt>
-              <dd>6.1%</dd>
-            </div>
-            <div>
-              <dt>Recent participation</dt>
-              <dd>80%</dd>
-            </div>
-          </dl>
-        </SectionCard>
-
-        <SectionCard
-          title="Protocol status"
-          description="Operational context for governance review."
-        >
-          <div className="status-stack">
-            <div className="status-row">
-              <span>Proposal cadence</span>
-              <StatusBadge label="Healthy" tone="success" />
-            </div>
-            <div className="status-row">
-              <span>Execution queue</span>
-              <StatusBadge label="2 pending" tone="pending" />
-            </div>
-            <div className="status-row">
-              <span>Gas outlook</span>
-              <StatusBadge label="Moderate" tone="warning" />
-            </div>
+          <div className="dashboard-hero__account">
+            <WalletStatus wallet={summary.wallet} />
           </div>
-        </SectionCard>
+        </section>
 
-        <SectionCard
-          title="Quick actions"
-          description="Navigation shortcuts for common governance tasks."
-          className="dashboard-grid__wide"
-        >
-          <div className="quick-actions">
-            <Link href="/app/proposals" className="quick-action-card">
-              <strong>Open proposals</strong>
-              <span>Review active governance items and draft-safe cards.</span>
+        <section className="dashboard-actions">
+          <article className="quick-action-card">
+            <strong>Review proposals</strong>
+            <span>Open the items that are ready for your attention now.</span>
+            <Link href="/app/proposals" className="quick-action-card__link">
+              Open proposals
             </Link>
-            <Link href="/app/history" className="quick-action-card">
-              <strong>View activity</strong>
-              <span>
-                Scan governance history in a structured timeline layout.
-              </span>
-            </Link>
-            <Link href="/app/settings" className="quick-action-card">
-              <strong>Check settings</strong>
-              <span>
-                Inspect placeholder account and governance preferences.
-              </span>
-            </Link>
-          </div>
-        </SectionCard>
+          </article>
 
-        <SectionCard
-          title="Recent proposals"
-          description="Preview of structured proposal cards used across the app."
-          className="dashboard-grid__wide"
-        >
-          <ProposalList proposals={recentProposals} />
-        </SectionCard>
+          <article className="quick-action-card">
+            <strong>Check what is ready next</strong>
+            <span>
+              See which items are ready or nearly ready to be completed.
+            </span>
+            <Link href="/app/execute" className="quick-action-card__link">
+              Open finalize
+            </Link>
+          </article>
+
+          <article className="quick-action-card">
+            <strong>Review recent activity</strong>
+            <span>Look back at recent outcomes and follow what changed.</span>
+            <Link href="/app/history" className="quick-action-card__link">
+              Open history
+            </Link>
+          </article>
+        </section>
+
+        <div className="two-column-layout">
+          <SectionCard
+            title="Needs your review"
+            description="These items are currently active and ready to be reviewed."
+            className="two-column-layout__wide"
+          >
+            <ProposalList
+              proposals={proposalsNeedingReview.slice(0, 3)}
+              emptyTitle="Nothing needs your review right now"
+              emptyDescription="When a new item becomes active, it will appear here."
+            />
+          </SectionCard>
+
+          <SectionCard
+            title="Recent activity"
+            description="A quick look at what happened most recently."
+          >
+            <div className="activity-preview-list">
+              {historyPreview.length > 0 ? (
+                historyPreview.map((item) => (
+                  <article key={item.id} className="activity-preview-item">
+                    <h3>{item.title}</h3>
+                    <p>{item.description}</p>
+                    <span>{item.occurredAt}</span>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-state empty-state--compact">
+                  <div className="empty-state__icon" aria-hidden="true">
+                    ≣
+                  </div>
+                  <h2>No recent activity yet</h2>
+                  <p>Recent updates will appear here as activity happens.</p>
+                </div>
+              )}
+            </div>
+          </SectionCard>
+
+          <SectionCard
+            title="At a glance"
+            description="A short summary of your current preview workspace."
+          >
+            <dl className="key-value-grid">
+              <div>
+                <dt>Open items</dt>
+                <dd>{summary.recentProposals.length}</dd>
+              </div>
+              <div>
+                <dt>Recent updates</dt>
+                <dd>{summary.recentActivity.length}</dd>
+              </div>
+              <div>
+                <dt>Account state</dt>
+                <dd>{summary.wallet.connectionLabel}</dd>
+              </div>
+              <div>
+                <dt>Participation</dt>
+                <dd>{summary.wallet.participationRate}</dd>
+              </div>
+            </dl>
+          </SectionCard>
+        </div>
       </div>
     </PageShell>
   );

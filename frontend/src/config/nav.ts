@@ -6,28 +6,28 @@ export type AppNavItem = {
 
 export const appNav: AppNavItem[] = [
   {
-    title: "Dashboard",
+    title: "Home",
     href: "/app/dashboard",
-    description: "Overview and governance health",
+    description: "Your overview and next steps",
   },
   {
     title: "Proposals",
     href: "/app/proposals",
-    description: "Review active and historical proposals",
+    description: "Items ready for review",
   },
   {
-    title: "Execute",
+    title: "Finalize",
     href: "/app/execute",
-    description: "Queued actions and execution readiness",
+    description: "Items ready or nearly ready",
   },
   {
     title: "History",
     href: "/app/history",
-    description: "Governance activity feed",
+    description: "Your recent activity",
   },
   {
     title: "Settings",
     href: "/app/settings",
-    description: "Preferences and account configuration",
+    description: "Account and session details",
   },
 ];

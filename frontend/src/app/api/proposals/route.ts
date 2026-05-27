@@ -1,9 +1,14 @@
+import { getProposals } from "@/lib/services/proposals";
 import { NextResponse } from "next/server";
 
 export async function GET() {
+  const proposals = await getProposals("all");
+
   return NextResponse.json({
-    ok: true,
-    route: "proposals",
-    status: "not_implemented",
+    data: proposals,
+    meta: {
+      source: "mock-governance-seed",
+      count: proposals.length,
+    },
   });
 }

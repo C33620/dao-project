@@ -1,157 +1,173 @@
+import { ProposalInteractionPanel } from "@/components/governance/proposal-interaction-panel";
 import { SectionCard } from "@/components/ui/section-card";
-import { StatusBadge, StatusTone } from "@/components/ui/status-badge";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { WalletStatus } from "@/components/wallet/wallet-status";
+import { formatDate } from "@/lib/utils/format";
+import type {
+  ExecutionReadinessState,
+  ProposalActionState,
+  ProposalDetail as ProposalDetailType,
+  WalletGovernanceProfile,
+} from "@/types/governance";
 
 type ProposalDetailProps = {
-  proposalId: string;
-  title: string;
-  status: string;
-  tone?: StatusTone;
+  proposal: ProposalDetailType;
+  wallet: WalletGovernanceProfile;
+  actionState: ProposalActionState;
+  executionState: ExecutionReadinessState;
 };
 
 export function ProposalDetail({
-  proposalId,
-  title,
-  status,
-  tone = "info",
+  proposal,
+  wallet,
+  actionState,
+  executionState,
 }: ProposalDetailProps) {
+  const quorumReached =
+    proposal.votes.totalParticipating >= proposal.votes.quorum;
+
   return (
     <div className="proposal-detail">
       <section className="proposal-detail__hero">
         <div className="proposal-detail__hero-copy">
-          <p className="proposal-detail__eyebrow">Proposal #{proposalId}</p>
-          <h1>{title}</h1>
-          <p className="proposal-detail__summary">
-            Placeholder overview for a governance proposal detail view. This
-            area is intentionally structured for later on-chain metadata,
-            proposer details, and final execution payloads.
-          </p>
+          <p className="proposal-detail__eyebrow">Proposal #{proposal.id}</p>
+          <h1>{proposal.title}</h1>
+          <p className="proposal-detail__summary">{proposal.excerpt}</p>
         </div>
+
         <div className="proposal-detail__hero-status">
-          <StatusBadge label={status} tone={tone} />
+          <StatusBadge
+            label={proposal.statusLabel}
+            tone={proposal.statusTone}
+          />
         </div>
       </section>
 
+      <WalletStatus wallet={wallet} />
+
       <div className="proposal-detail__meta-grid">
-        <SectionCard title="Metadata">
+        <SectionCard
+          title="Proposal context"
+          description="Core metadata and scheduling details for this governance action."
+        >
           <dl className="key-value-grid">
             <div>
               <dt>Proposer</dt>
-              <dd>Delegate Council</dd>
+              <dd>{proposal.proposer}</dd>
             </div>
             <div>
               <dt>Category</dt>
-              <dd>Treasury policy</dd>
+              <dd>{proposal.category}</dd>
             </div>
             <div>
               <dt>Created</dt>
-              <dd>May 18, 2026</dd>
+              <dd>{formatDate(proposal.createdAt)}</dd>
+            </div>
+            <div>
+              <dt>Voting opens</dt>
+              <dd>
+                {proposal.votingStartsAt
+                  ? formatDate(proposal.votingStartsAt)
+                  : "Not scheduled"}
+              </dd>
             </div>
             <div>
               <dt>Voting deadline</dt>
-              <dd>May 31, 2026</dd>
+              <dd>
+                {proposal.votingEndsAt
+                  ? formatDate(proposal.votingEndsAt)
+                  : "Not scheduled"}
+              </dd>
+            </div>
+            <div>
+              <dt>Executable at</dt>
+              <dd>
+                {proposal.executableAt
+                  ? formatDate(proposal.executableAt)
+                  : "Not scheduled"}
+              </dd>
             </div>
           </dl>
         </SectionCard>
 
-        <SectionCard title="Voting breakdown">
+        <SectionCard
+          title="Participation"
+          description="Current voting totals and quorum progress."
+        >
           <div className="vote-breakdown">
             <div>
               <span>For</span>
-              <strong>61%</strong>
+              <strong>{proposal.votes.for.toLocaleString()}</strong>
             </div>
             <div>
               <span>Against</span>
-              <strong>24%</strong>
+              <strong>{proposal.votes.against.toLocaleString()}</strong>
             </div>
             <div>
               <span>Abstain</span>
-              <strong>15%</strong>
+              <strong>{proposal.votes.abstain.toLocaleString()}</strong>
             </div>
           </div>
-          <div className="progress-stack" aria-hidden="true">
-            <span style={{ width: "61%" }} className="progress-stack__for" />
-            <span
-              style={{ width: "24%" }}
-              className="progress-stack__against"
-            />
-            <span
-              style={{ width: "15%" }}
-              className="progress-stack__abstain"
-            />
-          </div>
+
+          <dl className="key-value-grid key-value-grid--compact">
+            <div>
+              <dt>Total participation</dt>
+              <dd>{proposal.votes.totalParticipating.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Quorum target</dt>
+              <dd>{proposal.votes.quorum.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Quorum status</dt>
+              <dd>{quorumReached ? "Reached" : "Below quorum"}</dd>
+            </div>
+            <div>
+              <dt>Execution bundle</dt>
+              <dd>{proposal.contractSummary}</dd>
+            </div>
+          </dl>
         </SectionCard>
       </div>
 
       <div className="proposal-detail__body-grid">
         <SectionCard
-          title="Summary"
-          description="Structured placeholder copy for later proposal content."
+          title="Proposal narrative"
+          description="Structured rationale, intended changes, and supporting context."
         >
           <div className="prose-block">
-            <p>
-              This proposal placeholder represents a governance change request
-              that would normally include rationale, scope, affected contracts,
-              and operational risk notes.
-            </p>
-            <p>
-              The final wired version can replace this content with validated
-              proposal text, off-chain discussion links, and contract call
-              previews without changing the layout structure.
-            </p>
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          title="Action area"
-          description="Mock-safe call-to-action surface."
-        >
-          <div className="action-panel">
-            <div className="action-panel__row">
-              <span>Voting</span>
-              <strong>Not available in Phase 2</strong>
-            </div>
-            <div className="action-panel__row">
-              <span>Execution</span>
-              <strong>Awaiting queue review</strong>
-            </div>
-            <div className="button-row">
-              <button type="button" className="button button--primary" disabled>
-                Vote placeholder
-              </button>
-              <button
-                type="button"
-                className="button button--secondary"
-                disabled
-              >
-                Queue placeholder
-              </button>
-            </div>
+            {proposal.description.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
           </div>
         </SectionCard>
 
         <SectionCard
           title="Timeline"
-          description="Expected governance lifecycle steps."
+          description="Lifecycle progression and expected next steps."
         >
           <ol className="timeline-list">
-            <li>
-              <strong>Drafted</strong>
-              <span>Context prepared and shared with delegates.</span>
-            </li>
-            <li>
-              <strong>Voting live</strong>
-              <span>Token holders can review and cast votes.</span>
-            </li>
-            <li>
-              <strong>Queued</strong>
-              <span>Successful proposals move into timelock review.</span>
-            </li>
-            <li>
-              <strong>Ready to execute</strong>
-              <span>Execution becomes available after the queue delay.</span>
-            </li>
+            {proposal.timeline.map((item) => (
+              <li key={`${item.stage}-${item.date}`}>
+                <strong>{item.label}</strong>
+                <span>{formatDate(item.date)}</span>
+                <em>
+                  {item.current
+                    ? "Current stage"
+                    : item.complete
+                    ? "Completed"
+                    : "Upcoming"}
+                </em>
+              </li>
+            ))}
           </ol>
         </SectionCard>
+
+        <ProposalInteractionPanel
+          proposal={proposal}
+          actionState={actionState}
+          executionState={executionState}
+        />
       </div>
     </div>
   );

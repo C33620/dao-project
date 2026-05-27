@@ -1,94 +1,42 @@
-import type { ProposalCardData } from "@/components/governance/proposal-card";
 import { ProposalList } from "@/components/governance/proposal-list";
 import { PageShell } from "@/components/ui/page-shell";
+import { getProposals } from "@/lib/services/proposals";
 
-const proposals: ProposalCardData[] = [
-  {
-    id: "101",
-    title: "Refresh delegate incentives framework",
-    excerpt:
-      "Placeholder governance update focused on delegate compensation and reporting cadence.",
-    status: "Active",
-    tone: "info",
-    category: "Operations",
-    author: "Core Council",
-    createdAt: "May 22, 2026",
-    votingWindow: "Ends in 4 days",
-  },
-  {
-    id: "102",
-    title: "Update timelock execution thresholds",
-    excerpt:
-      "Placeholder protocol configuration item prepared for queue and execution review.",
-    status: "Queued",
-    tone: "pending",
-    category: "Protocol",
-    author: "Risk Working Group",
-    createdAt: "May 19, 2026",
-    votingWindow: "Queued for execution",
-  },
-  {
-    id: "103",
-    title: "Expand grants review committee",
-    excerpt:
-      "Placeholder community governance proposal for committee composition adjustments.",
-    status: "Succeeded",
-    tone: "success",
-    category: "Community",
-    author: "Ecosystem Lead",
-    createdAt: "May 12, 2026",
-    votingWindow: "Closed",
-  },
-  {
-    id: "104",
-    title: "Archive inactive incentive stream",
-    excerpt:
-      "Placeholder cleanup proposal with a narrower scope and low execution risk.",
-    status: "Defeated",
-    tone: "danger",
-    category: "Treasury",
-    author: "Operations Guild",
-    createdAt: "May 5, 2026",
-    votingWindow: "Closed",
-  },
-];
+export default async function ProposalsPage() {
+  const proposals = await getProposals("active");
 
-export default function ProposalsPage() {
   return (
     <PageShell
       title="Proposals"
-      description="Structured proposal overview with placeholder filters, search, and reusable cards."
+      description="Review the items that are active and ready for your attention."
     >
-      <section className="toolbar-card" aria-label="Proposal filters">
-        <div className="toolbar-card__search">
-          <label className="sr-only" htmlFor="proposal-search">
-            Search proposals
-          </label>
-          <input
-            id="proposal-search"
-            type="text"
-            placeholder="Search proposals (placeholder)"
-            readOnly
-          />
-        </div>
+      <div className="page-shell__content">
+        <section className="toolbar-card">
+          <div className="toolbar-card__search">
+            <p className="section-kicker">Active items</p>
+            <h2 className="toolbar-card__title">Items ready to review</h2>
+            <p className="toolbar-card__description">
+              Use this list to open an item, understand its current state, and
+              continue when you are ready.
+            </p>
+          </div>
 
-        <div className="toolbar-card__filters">
-          <button type="button" className="filter-pill" aria-pressed="true">
-            All
-          </button>
-          <button type="button" className="filter-pill">
-            Active
-          </button>
-          <button type="button" className="filter-pill">
-            Queued
-          </button>
-          <button type="button" className="filter-pill">
-            Closed
-          </button>
-        </div>
-      </section>
+          <div className="toolbar-card__filters" aria-label="Proposal filters">
+            <button type="button" className="filter-pill" aria-current="page">
+              Active
+            </button>
+            <button type="button" className="filter-pill">
+              Recent
+            </button>
+          </div>
+        </section>
 
-      <ProposalList proposals={proposals} />
+        <ProposalList
+          proposals={proposals}
+          emptyTitle="No active proposals right now"
+          emptyDescription="When a new item is ready for review, it will appear here."
+        />
+      </div>
     </PageShell>
   );
 }
