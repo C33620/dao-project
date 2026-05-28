@@ -1,3 +1,4 @@
+import { countUsers } from "@/lib/repositories/users";
 import { getProposals } from "@/lib/services/proposals";
 import Link from "next/link";
 import { HeroProposalCarousel } from "./components/hero-proposal-carousel";
@@ -41,7 +42,7 @@ function getLatestVotedProposals<
 export default async function LandingPage() {
   const proposals = await getProposals("all");
   const latestVotedProposals = getLatestVotedProposals(proposals);
-  const activeUsersCount = 248;
+  const activeUsersCount = await countUsers();
 
   return (
     <>

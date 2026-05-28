@@ -1,3 +1,4 @@
+import { getUserByIssuer } from "@/lib/repositories/users";
 import { getSession } from "@/lib/services/session";
 import type { UserProfile } from "@/types/user";
 import { redirect } from "next/navigation";
@@ -7,6 +8,12 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
 
   if (!session) {
     return null;
+  }
+
+  const persistedUser = await getUserByIssuer(session.issuer);
+
+  if (persistedUser) {
+    return persistedUser;
   }
 
   return {

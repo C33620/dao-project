@@ -1,3 +1,10 @@
+import {
+  getUserDocumentByEmail,
+  getUserDocumentByIssuer,
+  isMongoDuplicateKeyError,
+  normalizeEmail,
+  upsertUserFromVerifiedAuth,
+} from "@/lib/repositories/users";
 import { Magic } from "@magic-sdk/admin";
 import { SignJWT } from "jose";
 import { NextRequest, NextResponse } from "next/server";
@@ -6,7 +13,7 @@ const SESSION_COOKIE = "govboard_session";
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 type AuthRequestBody = {
-  action?: "verify" | "sign-out";
+  action?: "precheck" | "verify" | "sign-out";
   didToken?: string;
   email?: string;
   name?: string;
@@ -32,7 +39,7 @@ async function createSignedSessionToken(input: {
 }) {
   return new SignJWT({
     sub: input.issuer,
-    email: input.email,
+    email: normalizeEmail(input.email),
     displayName: input.displayName,
   })
     .setProtectedHeader({ alg: "HS256" })
@@ -41,16 +48,12 @@ async function createSignedSessionToken(input: {
     .sign(getSessionSecret());
 }
 
-function normalizeEmail(email: string) {
-  return email.trim().toLowerCase();
-}
-
 export async function GET() {
   return NextResponse.json({
     ok: true,
     route: "auth",
     status: "ready",
-    capabilities: ["verify", "sign-out"],
+    capabilities: ["precheck", "verify", "sign-out"],
   });
 }
 
@@ -71,6 +74,34 @@ export async function POST(request: NextRequest) {
     });
 
     return response;
+  }
+
+  if (body.action === "precheck") {
+    const normalizedEmail = body.email ? normalizeEmail(body.email) : "";
+
+    if (!normalizedEmail) {
+      return NextResponse.json(
+        { ok: false, error: "Email is required." },
+        { status: 400 },
+      );
+    }
+
+    if (body.isNewUser) {
+      const existingUserByEmail = await getUserDocumentByEmail(normalizedEmail);
+
+      if (existingUserByEmail) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "An account with this email already exists. Sign in instead.",
+          },
+          { status: 409 },
+        );
+      }
+    }
+
+    return NextResponse.json({ ok: true });
   }
 
   if (body.action !== "verify") {
@@ -102,7 +133,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    magic.token.validate(body.didToken);
+    await magic.token.validate(body.didToken);
 
     const metadata = await magic.users.getMetadataByToken(body.didToken);
 
@@ -126,6 +157,30 @@ export async function POST(request: NextRequest) {
     const displayName =
       body.name?.trim() || verifiedEmail.split("@")[0] || "Member";
 
+    const existingUserByIssuer = await getUserDocumentByIssuer(metadata.issuer);
+    const existingUserByEmail = await getUserDocumentByEmail(verifiedEmail);
+
+    if (
+      body.isNewUser &&
+      !existingUserByIssuer &&
+      existingUserByEmail &&
+      existingUserByEmail._id !== metadata.issuer
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "An account with this email already exists. Sign in instead.",
+        },
+        { status: 409 },
+      );
+    }
+
+    await upsertUserFromVerifiedAuth({
+      issuer: metadata.issuer,
+      email: verifiedEmail,
+      displayName,
+    });
+
     const sessionToken = await createSignedSessionToken({
       issuer: metadata.issuer,
       email: verifiedEmail,
@@ -148,9 +203,27 @@ export async function POST(request: NextRequest) {
     });
 
     return response;
-  } catch {
+  } catch (error) {
+    console.error("AUTH_VERIFY_ERROR", error);
+
+    if (isMongoDuplicateKeyError(error)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "An account with this email already exists. Sign in instead.",
+        },
+        { status: 409 },
+      );
+    }
+
     return NextResponse.json(
-      { ok: false, error: "We could not verify your sign-in." },
+      {
+        ok: false,
+        error:
+          error instanceof Error
+            ? error.message
+            : "We could not verify your sign-in.",
+      },
       { status: 401 },
     );
   }

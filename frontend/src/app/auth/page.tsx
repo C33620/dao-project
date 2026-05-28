@@ -8,6 +8,8 @@ import { FormEvent, useMemo, useState } from "react";
 type AuthMode = "existing" | "new";
 
 let magicClient: Magic | null = null;
+let pendingSignupName = "";
+let pendingSignupEmail = "";
 
 function getMagicClient() {
   if (!magicClient) {
@@ -43,12 +45,96 @@ export default function AuthPage() {
     setStatus("submitting");
     setMessage("");
 
+    const isNewUser = mode === "new";
+    const normalizedEmail = email.trim().toLowerCase();
+    const trimmedName = name.trim();
+
+    if (!normalizedEmail) {
+      setStatus("error");
+      setMessage("Email is required.");
+      return;
+    }
+
+    if (isNewUser && !trimmedName) {
+      setStatus("error");
+      setMessage("Name is required for new accounts.");
+      return;
+    }
+
+    if (isNewUser) {
+      pendingSignupName = trimmedName;
+      pendingSignupEmail = normalizedEmail;
+    } else {
+      pendingSignupName = "";
+      pendingSignupEmail = "";
+    }
+
     try {
+      const precheckResponse = await fetch("/api/auth", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          action: "precheck",
+          email: normalizedEmail,
+          isNewUser,
+        }),
+      });
+
+      const precheckData = await precheckResponse.json();
+
+      console.log("AUTH_PRECHECK_RESPONSE", precheckData);
+
+      if (!precheckResponse.ok) {
+        throw new Error(
+          precheckData?.error ?? "We could not continue right now.",
+        );
+      }
+
       const magic = getMagicClient();
 
-      const didToken = await magic.auth.loginWithMagicLink({
-        email,
+      console.log("AUTH_SUBMIT_PAYLOAD", {
+        mode,
+        isNewUser,
+        name: isNewUser ? trimmedName : undefined,
+        email: normalizedEmail,
+      });
+
+      const alreadyLoggedIn = await magic.user.isLoggedIn();
+
+      console.log("MAGIC_IS_LOGGED_IN", alreadyLoggedIn);
+
+      if (alreadyLoggedIn) {
+        console.log("MAGIC_LOGOUT_BEFORE_LOGIN");
+        await magic.user.logout();
+      }
+
+      console.log("MAGIC_LOGIN_START", {
+        email: normalizedEmail,
         showUI: true,
+      });
+
+      await magic.auth.loginWithMagicLink({
+        email: normalizedEmail,
+        showUI: true,
+      });
+
+      console.log("MAGIC_LOGIN_DONE");
+
+      const didToken = await magic.user.getIdToken();
+
+      const verifyName =
+        isNewUser && pendingSignupEmail === normalizedEmail
+          ? pendingSignupName
+          : undefined;
+
+      console.log("AUTH_VERIFY_REQUEST_BODY", {
+        action: "verify",
+        email: normalizedEmail,
+        name: verifyName,
+        isNewUser,
       });
 
       const response = await fetch("/api/auth", {
@@ -56,26 +142,37 @@ export default function AuthPage() {
         headers: {
           "Content-Type": "application/json",
         },
+        credentials: "same-origin",
         body: JSON.stringify({
           action: "verify",
           didToken,
-          email,
-          name: mode === "new" ? name : undefined,
-          isNewUser: mode === "new",
+          email: normalizedEmail,
+          name: verifyName,
+          isNewUser,
         }),
       });
 
       const data = await response.json();
 
+      console.log("AUTH_RESPONSE", data);
+
       if (!response.ok) {
         throw new Error(data?.error ?? "We could not continue right now.");
       }
+
+      pendingSignupName = "";
+      pendingSignupEmail = "";
 
       setStatus("sent");
       setMessage("Signed in successfully.");
       router.replace("/app/dashboard");
       router.refresh();
     } catch (error) {
+      console.error("AUTH_PAGE_ERROR", error);
+
+      pendingSignupName = "";
+      pendingSignupEmail = "";
+
       setStatus("error");
       setMessage(
         error instanceof Error
