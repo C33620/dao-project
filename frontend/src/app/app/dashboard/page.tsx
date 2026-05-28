@@ -1,154 +1,108 @@
 import { ProposalList } from "@/components/governance/proposal-list";
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
-import { WalletStatus } from "@/components/wallet/wallet-status";
 import {
-  getDashboardSummary,
   getProposals,
   getRecentGovernanceActivity,
 } from "@/lib/services/proposals";
 import Link from "next/link";
 
 export default async function DashboardPage() {
-  const [summary, proposalsNeedingReview, recentActivity] = await Promise.all([
-    getDashboardSummary(),
+  const [proposalsToValidate, recentActivity] = await Promise.all([
     getProposals("active"),
     getRecentGovernanceActivity(),
   ]);
 
-  const historyPreview = recentActivity.slice(0, 4);
+  const votedPreview = recentActivity.slice(0, 3);
+  const validationPreview = proposalsToValidate.slice(0, 3);
 
   return (
-    <PageShell
-      title="Home"
-      description="Start here with your account status, next actions, and recent activity."
-    >
+    <PageShell title="" description="">
       <div className="dashboard-stack">
-        <section className="dashboard-hero">
-          <div className="dashboard-hero__content">
-            <p className="section-kicker">Start here</p>
-            <h2 className="dashboard-hero__title">
-              Review what matters now and keep work moving.
-            </h2>
-            <p className="dashboard-hero__description">
-              Use this space to enter your name, connect securely when ready,
-              and jump straight into the next items that need your attention.
-            </p>
+        <SectionCard
+          title="Create a proposal"
+          description="Proposal creation will live here once the flow is added."
+        >
+          <div className="dashboard-cta-card">
+            <div className="dashboard-cta-card__content">
+              <p className="section-kicker">Coming soon</p>
+              <h2 className="dashboard-cta-card__title">
+                Create a new proposal from the dashboard.
+              </h2>
+              <p className="dashboard-cta-card__description">
+                This reusable entry point is reserved for the proposal creation
+                flow. For now, it marks where drafting and submission will
+                begin.
+              </p>
+            </div>
 
-            <form className="dashboard-name-form">
-              <label className="dashboard-name-form__field">
-                <span>Your name</span>
-                <input
-                  type="text"
-                  name="displayName"
-                  placeholder="Enter your name"
-                />
-              </label>
-
-              <div className="dashboard-name-form__actions">
-                <button type="button" className="button button--primary">
-                  Sign in securely
-                </button>
-                <button type="button" className="button button--secondary">
-                  Sign out
-                </button>
-              </div>
-            </form>
+            <div className="dashboard-cta-card__actions">
+              <button
+                type="button"
+                className="button button--secondary"
+                disabled
+                aria-disabled="true"
+              >
+                Create proposal
+              </button>
+            </div>
           </div>
-
-          <div className="dashboard-hero__account">
-            <WalletStatus wallet={summary.wallet} />
-          </div>
-        </section>
-
-        <section className="dashboard-actions">
-          <article className="quick-action-card">
-            <strong>Review proposals</strong>
-            <span>Open the items that are ready for your attention now.</span>
-            <Link href="/app/proposals" className="quick-action-card__link">
-              Open proposals
-            </Link>
-          </article>
-
-          <article className="quick-action-card">
-            <strong>Check what is ready next</strong>
-            <span>
-              See which items are ready or nearly ready to be completed.
-            </span>
-            <Link href="/app/execute" className="quick-action-card__link">
-              Open finalize
-            </Link>
-          </article>
-
-          <article className="quick-action-card">
-            <strong>Review recent activity</strong>
-            <span>Look back at recent outcomes and follow what changed.</span>
-            <Link href="/app/history" className="quick-action-card__link">
-              Open history
-            </Link>
-          </article>
-        </section>
+        </SectionCard>
 
         <div className="two-column-layout">
           <SectionCard
-            title="Needs your review"
-            description="These items are currently active and ready to be reviewed."
-            className="two-column-layout__wide"
+            title="Voted proposals"
+            description="A preview of recent governance outcomes."
           >
-            <ProposalList
-              proposals={proposalsNeedingReview.slice(0, 3)}
-              emptyTitle="Nothing needs your review right now"
-              emptyDescription="When a new item becomes active, it will appear here."
-            />
-          </SectionCard>
-
-          <SectionCard
-            title="Recent activity"
-            description="A quick look at what happened most recently."
-          >
-            <div className="activity-preview-list">
-              {historyPreview.length > 0 ? (
-                historyPreview.map((item) => (
-                  <article key={item.id} className="activity-preview-item">
-                    <h3>{item.title}</h3>
-                    <p>{item.description}</p>
-                    <span>{item.occurredAt}</span>
-                  </article>
-                ))
+            <div className="dashboard-section-stack">
+              {votedPreview.length > 0 ? (
+                <div className="activity-preview-list">
+                  {votedPreview.map((item) => (
+                    <article key={item.id} className="activity-preview-item">
+                      <h3>{item.title}</h3>
+                      <p>{item.description}</p>
+                      <span>{item.occurredAt}</span>
+                    </article>
+                  ))}
+                </div>
               ) : (
                 <div className="empty-state empty-state--compact">
                   <div className="empty-state__icon" aria-hidden="true">
                     ≣
                   </div>
-                  <h2>No recent activity yet</h2>
-                  <p>Recent updates will appear here as activity happens.</p>
+                  <h2>No voted proposals yet</h2>
+                  <p>
+                    Recent voted proposals will appear here once activity
+                    exists.
+                  </p>
                 </div>
               )}
+
+              <div className="dashboard-section-stack__footer">
+                <Link href="/app/history" className="button button--secondary">
+                  View more
+                </Link>
+              </div>
             </div>
           </SectionCard>
 
           <SectionCard
-            title="At a glance"
-            description="A short summary of your current preview workspace."
+            title="Proposals to validate"
+            description="Active proposals that still need your attention."
           >
-            <dl className="key-value-grid">
-              <div>
-                <dt>Open items</dt>
-                <dd>{summary.recentProposals.length}</dd>
+            <div className="dashboard-section-stack">
+              <ProposalList
+                proposals={validationPreview}
+                emptyTitle="No proposals need validation right now"
+                emptyDescription="When a proposal becomes active, it will appear here."
+              />
+
+              <div className="dashboard-section-stack__footer">
+                <Link href="/app/execute" className="button button--secondary">
+                  View more
+                </Link>
               </div>
-              <div>
-                <dt>Recent updates</dt>
-                <dd>{summary.recentActivity.length}</dd>
-              </div>
-              <div>
-                <dt>Account state</dt>
-                <dd>{summary.wallet.connectionLabel}</dd>
-              </div>
-              <div>
-                <dt>Participation</dt>
-                <dd>{summary.wallet.participationRate}</dd>
-              </div>
-            </dl>
+            </div>
           </SectionCard>
         </div>
       </div>

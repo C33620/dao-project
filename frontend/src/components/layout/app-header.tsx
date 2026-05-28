@@ -1,7 +1,7 @@
 "use client";
 
-import { usePathname } from "next/navigation";
-import { useMemo } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 
 type AppHeaderProps = {
   onMenuClick: () => void;
@@ -34,6 +34,8 @@ const titles: Record<string, { title: string; subtitle: string }> = {
 
 export function AppHeader({ onMenuClick }: AppHeaderProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [isSigningOut, setIsSigningOut] = useState(false);
 
   const routeMeta = useMemo(() => {
     if (pathname.startsWith("/app/proposals/")) {
@@ -46,12 +48,31 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
 
     return (
       titles[pathname] ?? {
-        title: "GovBoard",
+        title: "Workspace",
         subtitle:
           "A calmer workspace for reviewing and moving decisions forward.",
       }
     );
   }, [pathname]);
+
+  async function handleSignOut() {
+    setIsSigningOut(true);
+
+    try {
+      await fetch("/api/auth", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "sign-out" }),
+      });
+
+      router.replace("/");
+      router.refresh();
+    } finally {
+      setIsSigningOut(false);
+    }
+  }
 
   return (
     <header className="app-header">
@@ -68,21 +89,20 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
         </button>
 
         <div className="app-header__route">
-          <p className="app-header__eyebrow">GovBoard</p>
           <h1 className="app-header__title">{routeMeta.title}</h1>
           <p className="app-header__subtitle">{routeMeta.subtitle}</p>
         </div>
       </div>
 
       <div className="app-header__status" aria-label="Workspace status">
-        <div className="top-status-chip">
-          <span className="top-status-chip__label">Mode</span>
-          <span className="top-status-chip__value">Preview</span>
-        </div>
-        <div className="top-status-chip">
-          <span className="top-status-chip__label">Account</span>
-          <span className="top-status-chip__value">Not connected</span>
-        </div>
+        <button
+          type="button"
+          className="top-status-button top-status-button--logout"
+          onClick={handleSignOut}
+          disabled={isSigningOut}
+        >
+          {isSigningOut ? "Signing out..." : "Logout"}
+        </button>
       </div>
     </header>
   );

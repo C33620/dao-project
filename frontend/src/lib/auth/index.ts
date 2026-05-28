@@ -1,11 +1,28 @@
+import { getSession } from "@/lib/services/session";
 import type { UserProfile } from "@/types/user";
+import { redirect } from "next/navigation";
 
 export async function getCurrentUser(): Promise<UserProfile | null> {
-  // TODO: integrate Magic auth session lookup.
-  return null;
+  const session = await getSession();
+
+  if (!session) {
+    return null;
+  }
+
+  return {
+    id: session.issuer,
+    displayName: session.displayName,
+    email: session.email,
+    role: "member",
+  };
 }
 
-export async function requireUser(): Promise<UserProfile | null> {
-  // TODO: add authenticated guard behavior for protected app routes.
-  return getCurrentUser();
+export async function requireUser(): Promise<UserProfile> {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    redirect("/auth");
+  }
+
+  return user;
 }

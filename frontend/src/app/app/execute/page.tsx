@@ -8,24 +8,8 @@ export default async function ExecutePage() {
   const proposals = await getProposals("queued");
 
   return (
-    <PageShell
-      title="Finalize"
-      description="Review the items that are ready, or nearly ready, to move forward."
-    >
+    <PageShell title="" description="">
       <div className="page-shell__content">
-        <section className="toolbar-card">
-          <div className="toolbar-card__search">
-            <p className="section-kicker">Completion queue</p>
-            <h2 className="toolbar-card__title">
-              Items approaching completion
-            </h2>
-            <p className="toolbar-card__description">
-              Use this view to check what is queued, confirm timing, and
-              continue when the next step is available.
-            </p>
-          </div>
-        </section>
-
         <SectionCard
           title="Ready or nearly ready"
           description="These items are closest to the final step."

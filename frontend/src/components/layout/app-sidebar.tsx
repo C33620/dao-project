@@ -3,7 +3,8 @@
 import { appNav } from "@/config/nav";
 import { cn } from "@/lib/utils/cn";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
 
 type AppSidebarProps = {
   open: boolean;
@@ -12,26 +13,32 @@ type AppSidebarProps = {
 
 export function AppSidebar({ open, onClose }: AppSidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const [isSigningOut, setIsSigningOut] = useState(false);
+
+  async function handleSignOut() {
+    setIsSigningOut(true);
+
+    try {
+      await fetch("/api/auth", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "sign-out" }),
+      });
+
+      onClose();
+      router.replace("/");
+      router.refresh();
+    } finally {
+      setIsSigningOut(false);
+    }
+  }
 
   return (
     <>
       <aside className={cn("app-sidebar", open && "app-sidebar--open")}>
-        <div className="app-sidebar__brand">
-          <Link
-            href="/"
-            className="app-sidebar__logo"
-            aria-label="Go to landing page"
-          >
-            <span className="app-sidebar__logo-mark" aria-hidden="true">
-              ◧
-            </span>
-            <span>
-              <strong>GovBoard</strong>
-              <small>Clear decisions, calm workflow</small>
-            </span>
-          </Link>
-        </div>
-
         <nav className="app-sidebar__nav" aria-label="Primary navigation">
           {appNav.map((item) => {
             const isActive =
@@ -46,6 +53,7 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
                 aria-current={isActive ? "page" : undefined}
               >
                 <span className="app-sidebar__link-title">{item.title}</span>
+
                 {item.description ? (
                   <span className="app-sidebar__link-description">
                     {item.description}
@@ -56,17 +64,15 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
           })}
         </nav>
 
-        <div className="app-sidebar__footer">
-          <div className="sidebar-note">
-            <p className="sidebar-note__eyebrow">Workspace note</p>
-            <p className="sidebar-note__title">
-              Start with the clearest next step.
-            </p>
-            <p className="sidebar-note__text">
-              Review open items, follow recent activity, and keep the workflow
-              easy to scan from any page.
-            </p>
-          </div>
+        <div className="app-sidebar__mobile-actions">
+          <button
+            type="button"
+            className="top-status-button top-status-button--logout app-sidebar__logout"
+            onClick={handleSignOut}
+            disabled={isSigningOut}
+          >
+            {isSigningOut ? "Signing out..." : "Logout"}
+          </button>
         </div>
       </aside>
 
