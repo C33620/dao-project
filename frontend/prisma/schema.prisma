@@ -14,22 +14,86 @@ enum InviteCodeStatus {
   REVOKED
 }
 
+enum AccountSetupStatus {
+  PENDING
+  READY
+  NEEDS_ATTENTION
+}
+
+enum AccountSetupEventType {
+  WALLET_RESOLUTION_REQUESTED
+  WALLET_RESOLUTION_SUCCEEDED
+  WALLET_RESOLUTION_PENDING
+  WALLET_RESOLUTION_FAILED
+}
+
+enum TreasuryDistributionKind {
+  INITIAL_ALLOCATION
+}
+
+enum TreasuryDistributionStatus {
+  PENDING
+  PROCESSING
+  SUBMITTED
+  SUCCEEDED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+  PAUSED
+}
+
+enum TreasuryAuditEventType {
+  INITIAL_ALLOCATION_QUEUED
+  INITIAL_ALLOCATION_BLOCKED_PAUSED
+  INITIAL_ALLOCATION_BLOCKED_ALREADY_FUNDED
+  INITIAL_ALLOCATION_REQUESTED
+  INITIAL_ALLOCATION_SUBMITTED
+  INITIAL_ALLOCATION_CONFIRMED
+  INITIAL_ALLOCATION_FAILED
+  INITIAL_ALLOCATION_RETRY_SCHEDULED
+}
+
+enum UserRole {
+  MEMBER
+  DELEGATE
+  ADMIN
+  VIEWER
+}
+
 model User {
-  id                  String       @id @default(auto()) @map("_id") @db.ObjectId
-  issuer              String?      @unique
-  email               String
-  normalizedEmail     String       @unique
-  passwordHash        String?
-  name                String?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
+  id                      String                      @id @default(auto()) @map("_id") @db.ObjectId
+  issuer                  String?                     @unique
+  email                   String
+  normalizedEmail         String                      @unique
+  passwordHash            String?
+  name                    String?
+  role                    UserRole                    @default(MEMBER)
+  createdAt               DateTime                    @default(now())
+  updatedAt               DateTime                    @updatedAt
 
-  invitedByUserId     String?      @db.ObjectId
-  invitedByUser       User?        @relation("UserInvites", fields: [invitedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  invitedUsers        User[]       @relation("UserInvites")
+  invitedByUserId         String?                     @db.ObjectId
+  invitedByUser           User?                       @relation("UserInvites", fields: [invitedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  invitedUsers            User[]                      @relation("UserInvites")
 
-  createdInviteCodes  InviteCode[] @relation("InviteCodeCreator")
-  redeemedInviteCodes InviteCode[] @relation("RedeemedInviteCodes")
+  createdInviteCodes      InviteCode[]                @relation("InviteCodeCreator")
+  redeemedInviteCodes     InviteCode[]                @relation("RedeemedInviteCodes")
+
+  walletAddress           String?
+  walletChain             String?
+  walletProvider          String?
+  walletResolutionStatus  AccountSetupStatus          @default(PENDING)
+  walletResolvedAt        DateTime?
+  walletResolutionError   String?
+
+  accountSetupStatus      AccountSetupStatus          @default(PENDING)
+  accountSetupUpdatedAt   DateTime?
+
+  initialAllocationStatus TreasuryDistributionStatus?
+  initialAllocationAt     DateTime?
+  initialAllocationTxHash String?
+
+  accountSetupEvents      AccountSetupEvent[]
+  treasuryDistributions   TreasuryDistribution[]
+  treasuryAuditLogs       TreasuryAuditLog[]
 }
 
 model InviteCode {
@@ -46,4 +110,80 @@ model InviteCode {
 
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
+}
+
+model AccountSetupEvent {
+  id         String                @id @default(auto()) @map("_id") @db.ObjectId
+  userId     String                @db.ObjectId
+  user       User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       AccountSetupEventType
+  status     AccountSetupStatus
+  message    String?
+  metadata   Json?
+  createdAt  DateTime              @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model TreasuryDistribution {
+  id               String                     @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String                     @db.ObjectId
+  user             User                       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  kind             TreasuryDistributionKind
+  status           TreasuryDistributionStatus @default(PENDING)
+
+  amountBaseUnits  String
+  tokenAddress     String
+  chainId          Int
+  walletAddress    String
+
+  txHash           String?
+  idempotencyKey   String                     @unique
+  attemptCount     Int                        @default(0)
+
+  lastErrorCode    String?
+  lastErrorMessage String?
+
+  submittedAt      DateTime?
+  confirmedAt      DateTime?
+  processedAt      DateTime?
+
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+
+  @@unique([userId, kind])
+  @@index([status, updatedAt])
+  @@index([txHash])
+}
+
+model TreasuryAuditLog {
+  id               String                @id @default(auto()) @map("_id") @db.ObjectId
+  userId           String?               @db.ObjectId
+  user             User?                 @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  type             TreasuryAuditEventType
+  actor            String                @default("system")
+
+  normalizedEmail  String?
+  issuer           String?
+  walletAddress    String?
+  kind             TreasuryDistributionKind?
+  amountBaseUnits  String?
+  tokenAddress     String?
+  chainId          Int?
+  txHash           String?
+  idempotencyKey   String?
+
+  errorCode        String?
+  errorMessage     String?
+  metadata         Json?
+
+  createdAt        DateTime              @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([createdAt])
 }

@@ -4,7 +4,14 @@ import {
   normalizeInviteCode,
   resolveInviteAvailability,
 } from "@/lib/auth/invite";
+import { resolveUserWalletForSignup } from "@/lib/auth/wallet";
 import { db } from "@/lib/db";
+import {
+  assertRateLimit,
+  getRateLimitKey,
+  type RateLimitExceededError,
+} from "@/lib/rate-limit";
+import { queueInitialAllocationForUser } from "@/lib/treasury/distribute";
 import { Magic } from "@magic-sdk/admin";
 import { InviteCodeStatus, Prisma } from "@prisma/client";
 import { SignJWT } from "jose";
@@ -40,6 +47,56 @@ function getSessionSecret() {
 
 function logDebug(label: string, payload?: unknown) {
   console.log(`[AUTH_ROUTE] ${label}`, payload ?? "");
+}
+
+function buildRateLimitResponse(error: RateLimitExceededError) {
+  const retryAfterSeconds = Math.max(
+    1,
+    Math.ceil((error.resetAt - Date.now()) / 1000),
+  );
+
+  const response = NextResponse.json(
+    {
+      ok: false,
+      error: "Too many requests. Please wait and try again.",
+    },
+    { status: 429 },
+  );
+
+  response.headers.set("Retry-After", String(retryAfterSeconds));
+  response.headers.set("X-RateLimit-Limit", String(error.limit));
+  response.headers.set("X-RateLimit-Remaining", "0");
+  response.headers.set("X-RateLimit-Reset", String(error.resetAt));
+
+  return response;
+}
+
+function applyAuthRateLimit(input: {
+  action: "precheck" | "verify";
+  request: NextRequest;
+  email?: string;
+}) {
+  const forwardedFor = input.request.headers.get("x-forwarded-for");
+  const ip =
+    forwardedFor?.split(",")[0]?.trim() ||
+    input.request.headers.get("x-real-ip") ||
+    "unknown";
+
+  const normalizedEmail = input.email ? normalizeEmail(input.email) : null;
+
+  const key = getRateLimitKey(["auth", input.action, ip, normalizedEmail]);
+
+  if (input.action === "precheck") {
+    return assertRateLimit(key, {
+      limit: 10,
+      windowMs: 60 * 1000,
+    });
+  }
+
+  return assertRateLimit(key, {
+    limit: 5,
+    windowMs: 10 * 60 * 1000,
+  });
 }
 
 async function createSignedSessionToken(input: {
@@ -117,6 +174,7 @@ export async function POST(request: NextRequest) {
       name: SESSION_COOKIE,
       value: "",
       maxAge: 0,
+      expires: new Date(0),
       path: "/",
       httpOnly: true,
       sameSite: "lax",
@@ -128,6 +186,19 @@ export async function POST(request: NextRequest) {
   }
 
   if (body.action === "precheck") {
+    try {
+      applyAuthRateLimit({
+        action: "precheck",
+        request,
+        email: body.email,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.name === "RateLimitExceededError") {
+        return buildRateLimitResponse(error as RateLimitExceededError);
+      }
+      throw error;
+    }
+
     const normalizedEmail = body.email ? normalizeEmail(body.email) : "";
 
     if (!normalizedEmail) {
@@ -140,37 +211,6 @@ export async function POST(request: NextRequest) {
 
     const totalUsers = await db.user.count();
     logDebug("PRECHECK_TOTAL_USERS", { totalUsers });
-
-    if (body.isNewUser) {
-      const existingUser = await db.user.findUnique({
-        where: { normalizedEmail },
-        select: { id: true },
-      });
-
-      if (existingUser) {
-        logDebug("PRECHECK_EXISTING_USER_FOUND", {
-          normalizedEmail,
-          userId: existingUser.id,
-        });
-
-        return NextResponse.json(
-          {
-            ok: false,
-            error:
-              "An account with this email already exists. Sign in instead.",
-          },
-          { status: 409 },
-        );
-      }
-
-      if (totalUsers > 0 && !normalizeInviteCode(body.inviteCode ?? "")) {
-        logDebug("PRECHECK_MISSING_INVITE_CODE");
-        return NextResponse.json(
-          { ok: false, error: "Activation code is required." },
-          { status: 400 },
-        );
-      }
-    }
 
     logDebug("PRECHECK_SUCCESS", {
       requiresInviteCode: totalUsers > 0,
@@ -188,6 +228,19 @@ export async function POST(request: NextRequest) {
       { ok: false, error: "Unsupported auth action." },
       { status: 400 },
     );
+  }
+
+  try {
+    applyAuthRateLimit({
+      action: "verify",
+      request,
+      email: body.email,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "RateLimitExceededError") {
+      return buildRateLimitResponse(error as RateLimitExceededError);
+    }
+    throw error;
   }
 
   if (!process.env.MAGIC_SECRET_KEY) {
@@ -309,7 +362,6 @@ export async function POST(request: NextRequest) {
             status: true,
             expiresAt: true,
             createdByUserId: true,
-            redeemedByUserId: true,
           },
         });
 
@@ -363,90 +415,72 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        try {
-          const createdUser = await db.$transaction(async (tx) => {
-            const freshInvite = await tx.inviteCode.findUnique({
-              where: { id: invite.id },
-              select: {
-                id: true,
-                status: true,
-                expiresAt: true,
-                createdByUserId: true,
-                redeemedByUserId: true,
-              },
-            });
+        const transactionResult = await db.$transaction(async (tx) => {
+          const now = new Date();
 
-            if (!freshInvite) {
-              throw new Error("INVITE_NOT_FOUND");
-            }
-
-            const freshStatus = resolveInviteAvailability(
-              freshInvite.status,
-              freshInvite.expiresAt,
-            );
-
-            if (
-              freshStatus !== InviteCodeStatus.AVAILABLE ||
-              freshInvite.redeemedByUserId
-            ) {
-              throw new Error("INVITE_NOT_AVAILABLE");
-            }
-
-            const newUser = await tx.user.create({
-              data: {
-                issuer: metadata.issuer,
-                email: verifiedEmail,
-                normalizedEmail: verifiedEmail,
-                name: displayName,
-                invitedByUserId: freshInvite.createdByUserId,
-              },
-              select: {
-                id: true,
-                issuer: true,
-                email: true,
-                normalizedEmail: true,
-                name: true,
-              },
-            });
-
-            await tx.inviteCode.update({
-              where: { id: freshInvite.id },
-              data: {
-                status: InviteCodeStatus.REDEEMED,
-                redeemedAt: new Date(),
-                redeemedByUserId: newUser.id,
-              },
-            });
-
-            return newUser;
+          const currentInvite = await tx.inviteCode.findUnique({
+            where: { id: invite.id },
+            select: {
+              id: true,
+              status: true,
+              expiresAt: true,
+              createdByUserId: true,
+              redeemedByUserId: true,
+            },
           });
 
-          logDebug("INVITED_USER_CREATED", {
-            userId: createdUser.id,
-            invitedByUserId: invite.createdByUserId,
-          });
-
-          await createInviteForUser(createdUser.id);
-          user = createdUser;
-        } catch (error) {
-          if (
-            error instanceof Error &&
-            (error.message === "INVITE_NOT_FOUND" ||
-              error.message === "INVITE_NOT_AVAILABLE")
-          ) {
-            logDebug("INVITE_REDEEM_FAILED", {
-              inviteId: invite.id,
-              reason: error.message,
-            });
-
-            return NextResponse.json(
-              { ok: false, error: "Activation code is no longer available." },
-              { status: 409 },
-            );
+          if (!currentInvite) {
+            throw new Error("INVITE_NOT_FOUND");
           }
 
-          throw error;
-        }
+          const currentEffectiveStatus = resolveInviteAvailability(
+            currentInvite.status,
+            currentInvite.expiresAt,
+          );
+
+          if (
+            currentEffectiveStatus !== InviteCodeStatus.AVAILABLE ||
+            currentInvite.redeemedByUserId
+          ) {
+            throw new Error("INVITE_NOT_AVAILABLE");
+          }
+
+          const createdUser = await tx.user.create({
+            data: {
+              issuer: metadata.issuer,
+              email: verifiedEmail,
+              normalizedEmail: verifiedEmail,
+              name: displayName,
+              invitedByUserId: currentInvite.createdByUserId,
+            },
+            select: {
+              id: true,
+              issuer: true,
+              email: true,
+              normalizedEmail: true,
+              name: true,
+            },
+          });
+
+          await tx.inviteCode.update({
+            where: { id: currentInvite.id },
+            data: {
+              status: InviteCodeStatus.REDEEMED,
+              redeemedAt: now,
+              redeemedByUserId: createdUser.id,
+            },
+          });
+
+          return createdUser;
+        });
+
+        logDebug("INVITED_USER_CREATED", {
+          userId: transactionResult.id,
+          invitedByUserId: invite.createdByUserId,
+        });
+
+        await createInviteForUser(transactionResult.id);
+        user = transactionResult;
       }
     }
 
@@ -500,11 +534,72 @@ export async function POST(request: NextRequest) {
       issuer: metadata.issuer,
     });
 
+    let accountSetup: {
+      status: "ready" | "finalizing" | "needs_attention";
+      message: string;
+    } = {
+      status: body.isNewUser ? "finalizing" : "ready",
+      message: body.isNewUser
+        ? "We’re finalizing your account."
+        : "Your account is ready.",
+    };
+
+    if (body.isNewUser) {
+      const walletResolution = await resolveUserWalletForSignup({
+        userId: user.id,
+        issuer: metadata.issuer,
+        email: verifiedEmail,
+        didToken: body.didToken,
+      });
+
+      logDebug("WALLET_RESOLUTION_RESULT", {
+        userId: user.id,
+        status: walletResolution.status,
+      });
+
+      if (walletResolution.status === "resolved") {
+        const treasuryResult = await queueInitialAllocationForUser({
+          userId: user.id,
+          normalizedEmail: verifiedEmail,
+          issuer: metadata.issuer,
+          walletAddress: walletResolution.walletAddress,
+        });
+
+        logDebug("TREASURY_DISTRIBUTION_RESULT", {
+          userId: user.id,
+          status: treasuryResult.status,
+        });
+
+        if (treasuryResult.setupStatus === "ready") {
+          accountSetup = {
+            status: "ready",
+            message: "Your account is ready.",
+          };
+        } else {
+          accountSetup = {
+            status: "finalizing",
+            message: "We’re finalizing your account.",
+          };
+        }
+      } else if (walletResolution.status === "unavailable") {
+        accountSetup = {
+          status: "needs_attention",
+          message: "We’re still finishing your account setup.",
+        };
+      } else {
+        accountSetup = {
+          status: "finalizing",
+          message: "We’re finalizing your account.",
+        };
+      }
+    }
+
     const response = NextResponse.json({
       ok: true,
       message: body.isNewUser
         ? "Account created successfully."
         : "Signed in successfully.",
+      accountSetup,
     });
 
     response.cookies.set({
@@ -530,6 +625,17 @@ export async function POST(request: NextRequest) {
           ok: false,
           error: "An account with this email already exists. Sign in instead.",
         },
+        { status: 409 },
+      );
+    }
+
+    if (
+      error instanceof Error &&
+      (error.message === "INVITE_NOT_AVAILABLE" ||
+        error.message === "INVITE_NOT_FOUND")
+    ) {
+      return NextResponse.json(
+        { ok: false, error: "Activation code is no longer available." },
         { status: 409 },
       );
     }

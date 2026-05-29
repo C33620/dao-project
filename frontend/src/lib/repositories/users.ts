@@ -2,7 +2,7 @@ import "server-only";
 
 import { db } from "@/lib/db";
 import type { UserProfile } from "@/types/user";
-import { Prisma } from "@prisma/client";
+import { Prisma, UserRole } from "@prisma/client";
 
 export type UserDocument = {
   _id: string;
@@ -25,16 +25,31 @@ export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
+function mapUserRoleToProfileRole(role: UserRole): UserProfile["role"] {
+  switch (role) {
+    case UserRole.ADMIN:
+      return "admin";
+    case UserRole.DELEGATE:
+      return "delegate";
+    case UserRole.VIEWER:
+      return "viewer";
+    case UserRole.MEMBER:
+    default:
+      return "member";
+  }
+}
+
 function mapPrismaUserToUserProfile(user: {
   id: string;
   email: string;
   name: string | null;
+  role: UserRole;
 }): UserProfile {
   return {
     id: user.id,
     displayName: user.name ?? user.email.split("@")[0] ?? "Member",
     email: user.email,
-    role: "member",
+    role: mapUserRoleToProfileRole(user.role),
   };
 }
 
@@ -78,6 +93,7 @@ export async function getUserByIssuer(
       id: true,
       email: true,
       name: true,
+      role: true,
     },
   });
 
@@ -108,6 +124,15 @@ export async function updateUserProfileByIssuer(input: {
   const normalizedEmail = normalizeEmail(input.email);
   const trimmedDisplayName = input.displayName.trim();
 
+  const existingUser = await db.user.findUnique({
+    where: { issuer: input.issuer },
+    select: { id: true },
+  });
+
+  if (!existingUser) {
+    return null;
+  }
+
   const user = await db.user.update({
     where: { issuer: input.issuer },
     data: {
@@ -119,6 +144,7 @@ export async function updateUserProfileByIssuer(input: {
       id: true,
       email: true,
       name: true,
+      role: true,
     },
   });
 

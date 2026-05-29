@@ -5,9 +5,11 @@ import {
   updateUserProfileByIssuer,
 } from "@/lib/repositories/users";
 import { getSession } from "@/lib/services/session";
+import { SignJWT } from "jose";
 import { NextRequest, NextResponse } from "next/server";
 
 const SESSION_COOKIE = "govboard_session";
+const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 
 type PatchAccountRequestBody = {
   displayName?: string;
@@ -17,6 +19,45 @@ type PatchAccountRequestBody = {
 type DeleteAccountRequestBody = {
   confirmation?: string;
 };
+
+function getSessionSecret() {
+  const secret = process.env.AUTH_SESSION_SECRET;
+
+  if (!secret) {
+    throw new Error("AUTH_SESSION_SECRET is not configured.");
+  }
+
+  return new TextEncoder().encode(secret);
+}
+
+async function createSignedSessionToken(input: {
+  issuer: string;
+  email: string;
+  displayName: string;
+}) {
+  return new SignJWT({
+    sub: input.issuer,
+    email: normalizeEmail(input.email),
+    displayName: input.displayName,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
+    .sign(getSessionSecret());
+}
+
+function clearSessionCookie(response: NextResponse) {
+  response.cookies.set({
+    name: SESSION_COOKIE,
+    value: "",
+    maxAge: 0,
+    expires: new Date(0),
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+  });
+}
 
 function validateDisplayName(value: unknown): string | null {
   if (typeof value !== "string") {
@@ -57,10 +98,13 @@ function validateEmail(value: unknown): string | null {
 }
 
 function buildUnauthorizedResponse() {
-  return NextResponse.json(
+  const response = NextResponse.json(
     { ok: false, error: "You must be signed in." },
     { status: 401 },
   );
+
+  clearSessionCookie(response);
+  return response;
 }
 
 export async function PATCH(request: NextRequest) {
@@ -117,17 +161,37 @@ export async function PATCH(request: NextRequest) {
     });
 
     if (!user) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { ok: false, error: "We could not update your profile." },
         { status: 404 },
       );
+      clearSessionCookie(response);
+      return response;
     }
 
-    return NextResponse.json({
+    const sessionToken = await createSignedSessionToken({
+      issuer: session.issuer,
+      email: user.email ?? email,
+      displayName: user.displayName,
+    });
+
+    const response = NextResponse.json({
       ok: true,
       message: "Profile updated.",
       user,
     });
+
+    response.cookies.set({
+      name: SESSION_COOKIE,
+      value: sessionToken,
+      httpOnly: true,
+      sameSite: "lax",
+      secure: process.env.NODE_ENV === "production",
+      path: "/",
+      maxAge: SESSION_TTL_SECONDS,
+    });
+
+    return response;
   } catch (error) {
     if (isMongoDuplicateKeyError(error)) {
       return NextResponse.json(
@@ -174,10 +238,12 @@ export async function DELETE(request: NextRequest) {
     const deleted = await deleteUserByIssuer(session.issuer);
 
     if (!deleted) {
-      return NextResponse.json(
+      const response = NextResponse.json(
         { ok: false, error: "We could not delete your account." },
         { status: 404 },
       );
+      clearSessionCookie(response);
+      return response;
     }
 
     const response = NextResponse.json({
@@ -185,17 +251,7 @@ export async function DELETE(request: NextRequest) {
       redirectTo: "/",
     });
 
-    response.cookies.set({
-      name: SESSION_COOKIE,
-      value: "",
-      maxAge: 0,
-      expires: new Date(0),
-      path: "/",
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-    });
-
+    clearSessionCookie(response);
     return response;
   } catch (error) {
     console.error("ACCOUNT_DELETE_ERROR", error);
