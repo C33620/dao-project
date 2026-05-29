@@ -2,17 +2,19 @@
 
 import governanceTokenAbi from "@/abi/GovernanceToken.json";
 import myGovernorAbi from "@/abi/MyGovernor.json";
+import proposalRegistryAbi from "@/abi/ProposalRegistry.json";
 import {
-  blocksToApproxHours,
-  buildVotingPeriodProposalAction,
-  buildVotingPeriodProposalDescription,
+  buildProposalAction,
+  buildProposalDescription,
+  buildProposalSummary,
+  buildProposalTitle,
   getProposalReturnHref,
-  hoursToBlocks,
   type ProposalOrigin,
 } from "@/lib/governance/create-proposal";
 import {
   GOVERNANCE_TOKEN_ADDRESS,
   MY_GOVERNOR_ADDRESS,
+  PROPOSAL_REGISTRY_ADDRESS,
 } from "@/lib/web3/contracts";
 import Link from "next/link";
 import { useMemo, useState } from "react";
@@ -27,7 +29,15 @@ type CreateProposalClientProps = {
   origin: ProposalOrigin;
 };
 
-type ComposerStep = "draft" | "review" | "submitted";
+type SubmissionStage =
+  | "idle"
+  | "review"
+  | "wallet-governor"
+  | "creating-proposal"
+  | "wallet-registry"
+  | "saving-details"
+  | "success"
+  | "error";
 
 function isBigIntOrNumber(value: unknown): value is bigint | number {
   return typeof value === "bigint" || typeof value === "number";
@@ -37,23 +47,17 @@ export default function CreateProposalClient({
   origin,
 }: CreateProposalClientProps) {
   const { address, isConnected } = useAccount();
-  const [title, setTitle] = useState("Adjust voting period");
-  const [summary, setSummary] = useState("");
-  const [hours, setHours] = useState("10");
-  const [step, setStep] = useState<ComposerStep>("draft");
+  const [proposalText, setProposalText] = useState("");
+  const [details, setDetails] = useState("");
+  const [isReviewOpen, setIsReviewOpen] = useState(false);
+  const [submissionStage, setSubmissionStage] =
+    useState<SubmissionStage>("idle");
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [createdProposalId, setCreatedProposalId] = useState<bigint | null>(
+    null,
+  );
 
   const returnHref = getProposalReturnHref(origin);
-
-  const {
-    data: currentVotingPeriod,
-    isLoading: isLoadingVotingPeriod,
-    isError: isVotingPeriodError,
-  } = useReadContract({
-    abi: myGovernorAbi,
-    address: MY_GOVERNOR_ADDRESS,
-    functionName: "votingPeriod",
-  });
 
   const {
     data: proposalThreshold,
@@ -93,23 +97,6 @@ export default function CreateProposalClient({
     },
   });
 
-  const nextVotingPeriodBlocks = useMemo(() => {
-    const parsedHours = Number(hours);
-    return hoursToBlocks(parsedHours);
-  }, [hours]);
-
-  const nextVotingPeriodApproxHours = useMemo(() => {
-    return blocksToApproxHours(nextVotingPeriodBlocks);
-  }, [nextVotingPeriodBlocks]);
-
-  const currentVotingPeriodApproxHours = useMemo(() => {
-    if (!isBigIntOrNumber(currentVotingPeriod)) {
-      return null;
-    }
-
-    return blocksToApproxHours(currentVotingPeriod);
-  }, [currentVotingPeriod]);
-
   const readinessState = useMemo(() => {
     if (!isConnected || !address) {
       return {
@@ -120,25 +107,18 @@ export default function CreateProposalClient({
       };
     }
 
-    if (
-      isLoadingVotingPeriod ||
-      isLoadingThreshold ||
-      isLoadingDelegate ||
-      isLoadingVotes
-    ) {
+    if (isLoadingThreshold || isLoadingDelegate || isLoadingVotes) {
       return {
-        label: "We need to finish preparing your account",
-        description: "We are checking whether proposal creation is ready.",
+        label: "Checking your account",
+        description: "We are getting everything ready for proposal creation.",
         canContinue: false,
       };
     }
 
     if (
-      isVotingPeriodError ||
       isThresholdError ||
       isDelegateError ||
       isVotesError ||
-      !isBigIntOrNumber(currentVotingPeriod) ||
       !isBigIntOrNumber(proposalThreshold) ||
       !isBigIntOrNumber(votes)
     ) {
@@ -168,80 +148,127 @@ export default function CreateProposalClient({
 
     return {
       label: "Ready to create",
-      description: "You can review the change and submit your proposal.",
+      description: "Write your proposal, review it, and continue when ready.",
       canContinue: true,
     };
   }, [
     address,
-    currentVotingPeriod,
     delegatedTo,
     isConnected,
     isDelegateError,
     isLoadingDelegate,
     isLoadingThreshold,
     isLoadingVotes,
-    isLoadingVotingPeriod,
     isThresholdError,
     isVotesError,
-    isVotingPeriodError,
     proposalThreshold,
     votes,
   ]);
 
-  const {
-    data: hash,
-    isPending: isWritePending,
-    writeContract,
-  } = useWriteContract();
+  const proposalTitle = buildProposalTitle(proposalText);
+  const proposalSummary = buildProposalSummary(details);
+  const proposalDescription = buildProposalDescription({
+    proposalText,
+    details,
+  });
 
-  const { isLoading: isConfirming, isSuccess: isConfirmed } =
-    useWaitForTransactionReceipt({
-      hash,
-    });
+  const action = useMemo(() => buildProposalAction(), []);
 
-  const isSubmitting = isWritePending || isConfirming;
+  const governorWrite = useWriteContract();
+  const registryWrite = useWriteContract();
 
-  function handleReview() {
+  const governorReceipt = useWaitForTransactionReceipt({
+    hash: governorWrite.data,
+  });
+
+  const registryReceipt = useWaitForTransactionReceipt({
+    hash: registryWrite.data,
+  });
+
+  const isSubmitting =
+    governorWrite.isPending ||
+    governorReceipt.isLoading ||
+    registryWrite.isPending ||
+    registryReceipt.isLoading;
+
+  function deriveProposalId() {
+    return undefined;
+  }
+
+  function handleOpenReview() {
     if (!readinessState.canContinue) {
       return;
     }
 
     setSubmissionError(null);
-    setStep("review");
+    setSubmissionStage("review");
+    setIsReviewOpen(true);
   }
 
-  function handleBackToDraft() {
-    setStep("draft");
+  function handleCloseReview() {
+    if (isSubmitting) {
+      return;
+    }
+
+    setIsReviewOpen(false);
+    setSubmissionStage("idle");
   }
 
-  function handleSubmitProposal() {
+  function handleSubmitGovernorProposal() {
     try {
       setSubmissionError(null);
+      setSubmissionStage("wallet-governor");
 
-      const action = buildVotingPeriodProposalAction(nextVotingPeriodBlocks);
-      const description = buildVotingPeriodProposalDescription({
-        title,
-        summary,
-        newVotingPeriodBlocks: nextVotingPeriodBlocks,
-        newVotingPeriodHours: nextVotingPeriodApproxHours,
-      });
-
-      writeContract({
+      governorWrite.writeContract({
         abi: myGovernorAbi,
         address: MY_GOVERNOR_ADDRESS,
         functionName: "propose",
-        args: [action.targets, action.values, action.calldatas, description],
+        args: [
+          action.targets,
+          action.values,
+          action.calldatas,
+          proposalDescription,
+        ],
       });
+
+      setSubmissionStage("creating-proposal");
     } catch (error) {
+      setSubmissionStage("error");
       setSubmissionError(
         error instanceof Error
           ? error.message
-          : "We could not submit your proposal.",
+          : "We could not create your proposal.",
       );
     }
   }
 
-  if (isConfirmed) {
+  if (governorReceipt.isSuccess && createdProposalId === null && address) {
+    const proposalId = deriveProposalId();
+
+    if (typeof proposalId === "bigint") {
+      setCreatedProposalId(proposalId);
+      setSubmissionStage("wallet-registry");
+
+      if (!registryWrite.data && !registryWrite.isPending) {
+        registryWrite.writeContract({
+          abi: proposalRegistryAbi,
+          address: PROPOSAL_REGISTRY_ADDRESS,
+          functionName: "recordEntry",
+          args: [proposalId, proposalDescription, address],
+        });
+        setSubmissionStage("saving-details");
+      }
+    }
+  }
+
+  if (registryReceipt.isSuccess) {
+    if (submissionStage !== "success") {
+      setSubmissionStage("success");
+      setIsReviewOpen(false);
+    }
+  }
+
+  if (submissionStage === "success") {
     return (
       <div className="dashboard-section-stack">
         <div className="empty-state empty-state--compact">
@@ -250,8 +277,8 @@ export default function CreateProposalClient({
           </div>
           <h2>Proposal submitted</h2>
           <p>
-            Your proposal has been sent successfully and should appear after the
-            network confirms it.
+            Your proposal has been created and its details were saved
+            successfully.
           </p>
         </div>
 
@@ -265,20 +292,18 @@ export default function CreateProposalClient({
   }
 
   return (
-    <div className="dashboard-section-stack">
-      <div className="dashboard-cta-card">
-        <div className="dashboard-cta-card__content">
-          <p className="section-kicker">{readinessState.label}</p>
-          <h2 className="dashboard-cta-card__title">
-            Change how long voting stays open
-          </h2>
-          <p className="dashboard-cta-card__description">
-            {readinessState.description}
-          </p>
+    <>
+      <div className="dashboard-section-stack">
+        <div className="dashboard-cta-card">
+          <div className="dashboard-cta-card__content">
+            <p className="section-kicker">{readinessState.label}</p>
+            <h2 className="dashboard-cta-card__title">Create a proposal</h2>
+            <p className="dashboard-cta-card__description">
+              {readinessState.description}
+            </p>
+          </div>
         </div>
-      </div>
 
-      {step === "draft" ? (
         <div
           style={{
             display: "grid",
@@ -286,54 +311,15 @@ export default function CreateProposalClient({
           }}
         >
           <label style={{ display: "grid", gap: 8 }}>
-            <span style={{ fontWeight: 600 }}>Proposal title</span>
-            <input
-              type="text"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              maxLength={120}
-              style={{
-                minHeight: 48,
-                padding: "0 14px",
-                borderRadius: 12,
-                border: "1px solid rgba(15, 23, 42, 0.12)",
-                background: "white",
-                fontSize: 16,
-              }}
-            />
-          </label>
-
-          <label style={{ display: "grid", gap: 8 }}>
-            <span style={{ fontWeight: 600 }}>New voting duration</span>
-            <input
-              type="number"
-              min={1}
-              step={0.5}
-              inputMode="decimal"
-              value={hours}
-              onChange={(event) => setHours(event.target.value)}
-              style={{
-                minHeight: 48,
-                padding: "0 14px",
-                borderRadius: 12,
-                border: "1px solid rgba(15, 23, 42, 0.12)",
-                background: "white",
-                fontSize: 16,
-              }}
-            />
-            <span style={{ color: "rgba(15, 23, 42, 0.72)", fontSize: 14 }}>
-              We will convert this to blocks when your proposal is submitted.
+            <span style={{ fontWeight: 600 }}>
+              What would you like the group to consider?
             </span>
-          </label>
-
-          <label style={{ display: "grid", gap: 8 }}>
-            <span style={{ fontWeight: 600 }}>Why this change?</span>
             <textarea
-              value={summary}
-              onChange={(event) => setSummary(event.target.value)}
-              rows={5}
-              maxLength={1000}
-              placeholder="Explain why this voting duration would work better for the group."
+              value={proposalText}
+              onChange={(event) => setProposalText(event.target.value)}
+              rows={4}
+              maxLength={160}
+              placeholder="Example: Workshop on Saturday 12 March"
               style={{
                 padding: "12px 14px",
                 borderRadius: 12,
@@ -345,26 +331,47 @@ export default function CreateProposalClient({
             />
           </label>
 
-          <div
-            style={{
-              display: "grid",
-              gap: 8,
-              padding: 16,
-              borderRadius: 16,
-              background: "rgba(15, 23, 42, 0.04)",
-            }}
-          >
-            <p style={{ fontWeight: 600 }}>Preview</p>
-            <p>
-              Current voting duration:{" "}
-              {currentVotingPeriodApproxHours === null
-                ? "Loading..."
-                : `about ${currentVotingPeriodApproxHours} hours`}
+          <label style={{ display: "grid", gap: 8 }}>
+            <span style={{ fontWeight: 600 }}>Add more context (optional)</span>
+            <textarea
+              value={details}
+              onChange={(event) => setDetails(event.target.value)}
+              rows={5}
+              maxLength={1000}
+              placeholder="Add any context that would help the group understand this proposal."
+              style={{
+                padding: "12px 14px",
+                borderRadius: 12,
+                border: "1px solid rgba(15, 23, 42, 0.12)",
+                background: "white",
+                fontSize: 16,
+                resize: "vertical",
+              }}
+            />
+          </label>
+
+          {submissionError ? (
+            <p style={{ color: "rgb(185, 28, 28)" }}>{submissionError}</p>
+          ) : null}
+
+          {submissionStage === "wallet-governor" ||
+          submissionStage === "wallet-registry" ? (
+            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
+              Action needed in wallet.
             </p>
-            <p>
-              New voting duration: about {nextVotingPeriodApproxHours} hours
+          ) : null}
+
+          {submissionStage === "creating-proposal" ? (
+            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
+              Creating your proposal.
             </p>
-          </div>
+          ) : null}
+
+          {submissionStage === "saving-details" ? (
+            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
+              Saving proposal details.
+            </p>
+          ) : null}
 
           <div
             style={{
@@ -380,109 +387,139 @@ export default function CreateProposalClient({
             <button
               type="button"
               className="button button--primary"
-              onClick={handleReview}
+              onClick={handleOpenReview}
               disabled={
                 !readinessState.canContinue ||
-                title.trim().length === 0 ||
-                summary.trim().length === 0 ||
-                Number(hours) <= 0
+                proposalText.trim().length === 0 ||
+                isSubmitting
               }
             >
               Review proposal
             </button>
           </div>
         </div>
-      ) : (
+      </div>
+
+      {isReviewOpen ? (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="proposal-review-title"
           style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(15, 23, 42, 0.45)",
             display: "grid",
-            gap: 16,
+            placeItems: "center",
+            padding: 16,
+            zIndex: 1000,
           }}
         >
           <div
             style={{
+              width: "100%",
+              maxWidth: 640,
+              background: "white",
+              borderRadius: 20,
+              padding: 24,
               display: "grid",
-              gap: 12,
-              padding: 16,
-              borderRadius: 16,
-              background: "rgba(15, 23, 42, 0.04)",
+              gap: 16,
+              boxShadow: "0 24px 48px rgba(15, 23, 42, 0.18)",
             }}
           >
-            <div>
-              <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
-                Proposal title
+            <div style={{ display: "grid", gap: 8 }}>
+              <p className="section-kicker" style={{ margin: 0 }}>
+                Review
               </p>
-              <p style={{ fontWeight: 600 }}>{title}</p>
-            </div>
-
-            <div>
-              <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
-                Current voting duration
-              </p>
-              <p>
-                {currentVotingPeriodApproxHours === null
-                  ? "Loading..."
-                  : `about ${currentVotingPeriodApproxHours} hours`}
+              <h2 id="proposal-review-title" style={{ margin: 0 }}>
+                Review your proposal
+              </h2>
+              <p style={{ margin: 0, color: "rgba(15, 23, 42, 0.72)" }}>
+                Check everything here first. After you continue, we will ask you
+                to confirm in your wallet.
               </p>
             </div>
 
-            <div>
-              <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
-                New voting duration
-              </p>
-              <p>
-                about {nextVotingPeriodApproxHours} hours (
-                {nextVotingPeriodBlocks} blocks)
-              </p>
-            </div>
-
-            <div>
-              <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
-                Summary
-              </p>
-              <p>{summary}</p>
-            </div>
-          </div>
-
-          {submissionError ? (
-            <p style={{ color: "rgb(185, 28, 28)" }}>{submissionError}</p>
-          ) : null}
-
-          {hash ? (
-            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              {isConfirming
-                ? "Submitting your proposal..."
-                : "Waiting for network confirmation..."}
-            </p>
-          ) : null}
-
-          <div
-            style={{
-              display: "flex",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <button
-              type="button"
-              className="button button--secondary"
-              onClick={handleBackToDraft}
-              disabled={isSubmitting}
+            <div
+              style={{
+                display: "grid",
+                gap: 12,
+                padding: 16,
+                borderRadius: 16,
+                background: "rgba(15, 23, 42, 0.04)",
+              }}
             >
-              Back
-            </button>
+              <div>
+                <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
+                  Proposal
+                </p>
+                <p style={{ fontWeight: 600, margin: 0 }}>{proposalTitle}</p>
+              </div>
 
-            <button
-              type="button"
-              className="button button--primary"
-              onClick={handleSubmitProposal}
-              disabled={isSubmitting || !readinessState.canContinue}
+              {proposalSummary ? (
+                <div>
+                  <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
+                    Context
+                  </p>
+                  <p style={{ margin: 0 }}>{proposalSummary}</p>
+                </div>
+              ) : null}
+            </div>
+
+            {submissionError ? (
+              <p style={{ color: "rgb(185, 28, 28)", margin: 0 }}>
+                {submissionError}
+              </p>
+            ) : null}
+
+            {submissionStage === "wallet-governor" ||
+            submissionStage === "wallet-registry" ? (
+              <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
+                Action needed in wallet.
+              </p>
+            ) : null}
+
+            {submissionStage === "creating-proposal" ? (
+              <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
+                Creating your proposal.
+              </p>
+            ) : null}
+
+            {submissionStage === "saving-details" ? (
+              <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
+                Saving proposal details.
+              </p>
+            ) : null}
+
+            <div
+              style={{
+                display: "flex",
+                gap: 12,
+                flexWrap: "wrap",
+                justifyContent: "flex-start",
+              }}
             >
-              {isSubmitting ? "Submitting your proposal" : "Submit proposal"}
-            </button>
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={handleCloseReview}
+                disabled={isSubmitting}
+              >
+                Back and edit
+              </button>
+
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={handleSubmitGovernorProposal}
+                disabled={isSubmitting}
+              >
+                {isSubmitting ? "Continuing..." : "Accept and continue"}
+              </button>
+            </div>
           </div>
         </div>
-      )}
-    </div>
+      ) : null}
+    </>
   );
 }

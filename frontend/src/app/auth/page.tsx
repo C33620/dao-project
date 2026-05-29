@@ -3,13 +3,11 @@
 import { Magic } from "magic-sdk";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type AuthMode = "existing" | "new";
 
 let magicClient: Magic | null = null;
-let pendingSignupName = "";
-let pendingSignupEmail = "";
 
 function getMagicClient() {
   if (!magicClient) {
@@ -25,11 +23,39 @@ function getMagicClient() {
   return magicClient;
 }
 
+async function waitForAuthenticatedSession(retries = 8, delayMs = 250) {
+  for (let attempt = 0; attempt < retries; attempt += 1) {
+    const response = await fetch("/api/session", {
+      method: "GET",
+      credentials: "same-origin",
+      cache: "no-store",
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+
+      if (data?.authenticated) {
+        return true;
+      }
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  return false;
+}
+
 export default function AuthPage() {
   const router = useRouter();
+
   const [mode, setMode] = useState<AuthMode>("existing");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [inviteCode, setInviteCode] = useState("");
+  const [requiresInviteCode, setRequiresInviteCode] = useState<boolean | null>(
+    null,
+  );
+  const [checkedEmail, setCheckedEmail] = useState("");
   const [status, setStatus] = useState<
     "idle" | "submitting" | "sent" | "error"
   >("idle");
@@ -40,6 +66,38 @@ export default function AuthPage() {
     [mode],
   );
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkExistingSession() {
+      try {
+        const response = await fetch("/api/session", {
+          method: "GET",
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json();
+
+        if (!cancelled && data?.authenticated) {
+          window.location.assign("/app/dashboard");
+        }
+      } catch {
+        // ignore
+      }
+    }
+
+    checkExistingSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus("submitting");
@@ -48,6 +106,7 @@ export default function AuthPage() {
     const isNewUser = mode === "new";
     const normalizedEmail = email.trim().toLowerCase();
     const trimmedName = name.trim();
+    const trimmedInviteCode = inviteCode.trim();
 
     if (!normalizedEmail) {
       setStatus("error");
@@ -61,81 +120,81 @@ export default function AuthPage() {
       return;
     }
 
-    if (isNewUser) {
-      pendingSignupName = trimmedName;
-      pendingSignupEmail = normalizedEmail;
-    } else {
-      pendingSignupName = "";
-      pendingSignupEmail = "";
-    }
-
     try {
-      const precheckResponse = await fetch("/api/auth", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "same-origin",
-        body: JSON.stringify({
-          action: "precheck",
-          email: normalizedEmail,
-          isNewUser,
-        }),
-      });
+      const shouldRunPrecheck =
+        !isNewUser ||
+        requiresInviteCode === null ||
+        checkedEmail !== normalizedEmail;
 
-      const precheckData = await precheckResponse.json();
+      if (shouldRunPrecheck) {
+        const precheckResponse = await fetch("/api/auth", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            action: "precheck",
+            email: normalizedEmail,
+            inviteCode: trimmedInviteCode,
+            isNewUser,
+          }),
+        });
 
-      console.log("AUTH_PRECHECK_RESPONSE", precheckData);
+        const precheckData = await precheckResponse.json();
 
-      if (!precheckResponse.ok) {
-        throw new Error(
-          precheckData?.error ?? "We could not continue right now.",
-        );
+        if (isNewUser) {
+          const inviteRequired = Boolean(precheckData.requiresInviteCode);
+          setRequiresInviteCode(inviteRequired);
+          setCheckedEmail(normalizedEmail);
+
+          if (!precheckResponse.ok) {
+            setStatus("error");
+            setMessage(
+              precheckData?.error ?? "We could not continue right now.",
+            );
+            return;
+          }
+
+          if (inviteRequired && !trimmedInviteCode) {
+            setStatus("idle");
+            setMessage("Enter your activation code to create your account.");
+            return;
+          }
+        } else {
+          setRequiresInviteCode(null);
+          setCheckedEmail("");
+
+          if (!precheckResponse.ok) {
+            setStatus("error");
+            setMessage(
+              precheckData?.error ?? "We could not continue right now.",
+            );
+            return;
+          }
+        }
+      }
+
+      if (isNewUser && requiresInviteCode && !trimmedInviteCode) {
+        setStatus("idle");
+        setMessage("Enter your activation code to create your account.");
+        return;
       }
 
       const magic = getMagicClient();
 
-      console.log("AUTH_SUBMIT_PAYLOAD", {
-        mode,
-        isNewUser,
-        name: isNewUser ? trimmedName : undefined,
-        email: normalizedEmail,
-      });
-
       const alreadyLoggedIn = await magic.user.isLoggedIn();
 
-      console.log("MAGIC_IS_LOGGED_IN", alreadyLoggedIn);
-
       if (alreadyLoggedIn) {
-        console.log("MAGIC_LOGOUT_BEFORE_LOGIN");
         await magic.user.logout();
       }
-
-      console.log("MAGIC_LOGIN_START", {
-        email: normalizedEmail,
-        showUI: true,
-      });
 
       await magic.auth.loginWithMagicLink({
         email: normalizedEmail,
         showUI: true,
       });
 
-      console.log("MAGIC_LOGIN_DONE");
-
       const didToken = await magic.user.getIdToken();
-
-      const verifyName =
-        isNewUser && pendingSignupEmail === normalizedEmail
-          ? pendingSignupName
-          : undefined;
-
-      console.log("AUTH_VERIFY_REQUEST_BODY", {
-        action: "verify",
-        email: normalizedEmail,
-        name: verifyName,
-        isNewUser,
-      });
 
       const response = await fetch("/api/auth", {
         method: "POST",
@@ -147,31 +206,35 @@ export default function AuthPage() {
           action: "verify",
           didToken,
           email: normalizedEmail,
-          name: verifyName,
+          name: isNewUser ? trimmedName : undefined,
+          inviteCode: isNewUser ? trimmedInviteCode : undefined,
           isNewUser,
         }),
       });
 
       const data = await response.json();
 
-      console.log("AUTH_RESPONSE", data);
-
       if (!response.ok) {
         throw new Error(data?.error ?? "We could not continue right now.");
       }
 
-      pendingSignupName = "";
-      pendingSignupEmail = "";
+      const sessionReady = await waitForAuthenticatedSession();
+
+      if (!sessionReady) {
+        throw new Error(
+          "Sign-in succeeded, but the session was not ready yet. Please try again.",
+        );
+      }
 
       setStatus("sent");
-      setMessage("Signed in successfully.");
-      router.replace("/app/dashboard");
+      setMessage(
+        isNewUser ? "Account created successfully." : "Signed in successfully.",
+      );
+
       router.refresh();
+      window.location.assign("/app/dashboard");
     } catch (error) {
       console.error("AUTH_PAGE_ERROR", error);
-
-      pendingSignupName = "";
-      pendingSignupEmail = "";
 
       setStatus("error");
       setMessage(
@@ -256,7 +319,13 @@ export default function AuthPage() {
           >
             <button
               type="button"
-              onClick={() => setMode("existing")}
+              onClick={() => {
+                setMode("existing");
+                setMessage("");
+                setInviteCode("");
+                setRequiresInviteCode(null);
+                setCheckedEmail("");
+              }}
               aria-pressed={mode === "existing"}
               style={{
                 minHeight: 48,
@@ -289,7 +358,11 @@ export default function AuthPage() {
 
             <button
               type="button"
-              onClick={() => setMode("new")}
+              onClick={() => {
+                setMode("new");
+                setMessage("");
+                setStatus("idle");
+              }}
               aria-pressed={mode === "new"}
               style={{
                 minHeight: 48,
@@ -357,7 +430,21 @@ export default function AuthPage() {
               <input
                 type="email"
                 value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                onChange={(event) => {
+                  const nextEmail = event.target.value;
+                  setEmail(nextEmail);
+
+                  if (
+                    checkedEmail &&
+                    checkedEmail !== nextEmail.trim().toLowerCase()
+                  ) {
+                    setRequiresInviteCode(null);
+                    setInviteCode("");
+                    setCheckedEmail("");
+                    setMessage("");
+                    setStatus("idle");
+                  }
+                }}
                 placeholder="name@example.com"
                 required
                 style={{
@@ -374,6 +461,49 @@ export default function AuthPage() {
               />
             </label>
 
+            {mode === "new" ? (
+              <label style={{ display: "grid", gap: 8 }}>
+                <span style={{ fontSize: 14, fontWeight: 500 }}>
+                  Activation code
+                </span>
+                <input
+                  type="text"
+                  value={inviteCode}
+                  onChange={(event) =>
+                    setInviteCode(event.target.value.toUpperCase())
+                  }
+                  placeholder="Enter your activation code"
+                  autoComplete="off"
+                  style={{
+                    width: "100%",
+                    minHeight: 52,
+                    padding: "0 16px",
+                    borderRadius: 14,
+                    border: "1px solid rgba(15, 23, 42, 0.12)",
+                    background: "rgba(255,255,255,0.92)",
+                    outline: "none",
+                    fontSize: 16,
+                    textTransform: "uppercase",
+                    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
+                  }}
+                />
+              </label>
+            ) : null}
+
+            {mode === "new" ? (
+              <p
+                style={{
+                  marginTop: -4,
+                  fontSize: 13,
+                  color: "var(--color-text-muted, rgba(17,24,39,0.7))",
+                }}
+              >
+                {requiresInviteCode === false
+                  ? "No activation code is required for the first account."
+                  : "The first account can be created without a code. Additional accounts require an activation code."}
+              </p>
+            ) : null}
+
             <div
               className="landing-hero__actions"
               style={{
@@ -387,7 +517,13 @@ export default function AuthPage() {
                 disabled={status === "submitting"}
                 style={{ minWidth: 180 }}
               >
-                {status === "submitting" ? "Signing in..." : "Continue"}
+                {status === "submitting"
+                  ? "Signing in..."
+                  : mode === "existing"
+                  ? "Continue"
+                  : requiresInviteCode === true && !inviteCode
+                  ? "Continue"
+                  : "Create account"}
               </button>
             </div>
           </form>

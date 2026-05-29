@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("MONGODB_URI")
+}
+
+enum InviteCodeStatus {
+  AVAILABLE
+  REDEEMED
+  EXPIRED
+  REVOKED
+}
+
+model User {
+  id                  String       @id @default(auto()) @map("_id") @db.ObjectId
+  issuer              String?      @unique
+  email               String
+  normalizedEmail     String       @unique
+  passwordHash        String?
+  name                String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+
+  invitedByUserId     String?      @db.ObjectId
+  invitedByUser       User?        @relation("UserInvites", fields: [invitedByUserId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  invitedUsers        User[]       @relation("UserInvites")
+
+  createdInviteCodes  InviteCode[] @relation("InviteCodeCreator")
+  redeemedInviteCodes InviteCode[] @relation("RedeemedInviteCodes")
+}
+
+model InviteCode {
+  id               String           @id @default(auto()) @map("_id") @db.ObjectId
+  code             String           @unique
+  status           InviteCodeStatus @default(AVAILABLE)
+  expiresAt        DateTime?
+  redeemedAt       DateTime?
+  redeemedByUserId String?          @db.ObjectId
+  redeemedByUser   User?            @relation("RedeemedInviteCodes", fields: [redeemedByUserId], references: [id])
+
+  createdByUserId  String           @db.ObjectId
+  createdByUser    User             @relation("InviteCodeCreator", fields: [createdByUserId], references: [id])
+
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+}

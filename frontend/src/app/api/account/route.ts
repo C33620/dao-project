@@ -171,7 +171,14 @@ export async function DELETE(request: NextRequest) {
   }
 
   try {
-    await deleteUserByIssuer(session.issuer);
+    const deleted = await deleteUserByIssuer(session.issuer);
+
+    if (!deleted) {
+      return NextResponse.json(
+        { ok: false, error: "We could not delete your account." },
+        { status: 404 },
+      );
+    }
 
     const response = NextResponse.json({
       ok: true,
@@ -182,6 +189,7 @@ export async function DELETE(request: NextRequest) {
       name: SESSION_COOKIE,
       value: "",
       maxAge: 0,
+      expires: new Date(0),
       path: "/",
       httpOnly: true,
       sameSite: "lax",

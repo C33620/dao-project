@@ -12,16 +12,11 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
 
   const persistedUser = await getUserByIssuer(session.issuer);
 
-  if (persistedUser) {
-    return persistedUser;
+  if (!persistedUser) {
+    return null;
   }
 
-  return {
-    id: session.issuer,
-    displayName: session.displayName,
-    email: session.email,
-    role: "member",
-  };
+  return persistedUser;
 }
 
 export async function requireUser(): Promise<UserProfile> {

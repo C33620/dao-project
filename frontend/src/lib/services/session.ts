@@ -23,6 +23,8 @@ export async function getSession(): Promise<AppSession | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
 
+  console.log("[SESSION_SERVICE] COOKIE_PRESENT", Boolean(token));
+
   if (!token) {
     return null;
   }
@@ -37,7 +39,14 @@ export async function getSession(): Promise<AppSession | null> {
     const displayName =
       typeof payload.displayName === "string" ? payload.displayName : null;
 
+    console.log("[SESSION_SERVICE] SESSION_PAYLOAD", {
+      issuer,
+      email,
+      displayName,
+    });
+
     if (!issuer || !email || !displayName) {
+      console.log("[SESSION_SERVICE] SESSION_INVALID_SHAPE");
       return null;
     }
 
@@ -46,7 +55,8 @@ export async function getSession(): Promise<AppSession | null> {
       email,
       displayName,
     };
-  } catch {
+  } catch (error) {
+    console.error("[SESSION_SERVICE] SESSION_VERIFY_FAILED", error);
     return null;
   }
 }

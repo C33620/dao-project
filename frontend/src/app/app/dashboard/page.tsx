@@ -22,11 +22,11 @@ export default async function DashboardPage() {
       <div className="dashboard-stack">
         <SectionCard
           title="Create a proposal"
-          description="Turn an idea into a proposal your group can review and vote on."
+          description="Start something the group can consider together."
         >
           <CreateProposalEntryCard
             origin="dashboard"
-            description="Start a proposal to change how long voting stays open, then review it before submission."
+            description="Write a proposal for the group to review and vote on."
           />
         </SectionCard>
 

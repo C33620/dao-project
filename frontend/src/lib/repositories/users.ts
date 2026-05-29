@@ -1,8 +1,8 @@
 import "server-only";
 
-import { getUsersCollection } from "@/lib/db/mongodb";
+import { db } from "@/lib/db";
 import type { UserProfile } from "@/types/user";
-import { MongoServerError } from "mongodb";
+import { Prisma } from "@prisma/client";
 
 export type UserDocument = {
   _id: string;
@@ -25,18 +25,24 @@ export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
 }
 
-function mapUserDocumentToUserProfile(document: UserDocument): UserProfile {
+function mapPrismaUserToUserProfile(user: {
+  id: string;
+  email: string;
+  name: string | null;
+}): UserProfile {
   return {
-    id: document._id,
-    displayName: document.displayName,
-    email: document.email,
-    walletAddress: document.primaryWallet ?? undefined,
+    id: user.id,
+    displayName: user.name ?? user.email.split("@")[0] ?? "Member",
+    email: user.email,
     role: "member",
   };
 }
 
 export function isMongoDuplicateKeyError(error: unknown): boolean {
-  return error instanceof MongoServerError && error.code === 11000;
+  return (
+    error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002"
+  );
 }
 
 export async function upsertUserFromVerifiedAuth(input: {
@@ -44,56 +50,54 @@ export async function upsertUserFromVerifiedAuth(input: {
   email: string;
   displayName: string;
 }) {
-  const users = await getUsersCollection();
-  const now = new Date();
-  const email = normalizeEmail(input.email);
-  const displayName = input.displayName.trim();
+  const normalizedEmail = normalizeEmail(input.email);
+  const trimmedDisplayName = input.displayName.trim();
 
-  await users.updateOne(
-    { _id: input.issuer },
-    {
-      $set: {
-        email,
-        updatedAt: now,
-        lastSignedInAt: now,
-      },
-      $setOnInsert: {
-        _id: input.issuer,
-        displayName,
-        wallets: [],
-        primaryWallet: null,
-        createdAt: now,
-      },
+  await db.user.upsert({
+    where: { issuer: input.issuer },
+    update: {
+      email: normalizedEmail,
+      normalizedEmail,
+      name: trimmedDisplayName,
     },
-    { upsert: true },
-  );
+    create: {
+      issuer: input.issuer,
+      email: normalizedEmail,
+      normalizedEmail,
+      name: trimmedDisplayName,
+    },
+  });
 }
 
 export async function getUserByIssuer(
   issuer: string,
 ): Promise<UserProfile | null> {
-  const users = await getUsersCollection();
-  const document = await users.findOne({ _id: issuer });
+  const user = await db.user.findUnique({
+    where: { issuer },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+    },
+  });
 
-  if (!document) {
+  if (!user) {
     return null;
   }
 
-  return mapUserDocumentToUserProfile(document);
+  return mapPrismaUserToUserProfile(user);
 }
 
-export async function getUserDocumentByIssuer(
-  issuer: string,
-): Promise<UserDocument | null> {
-  const users = await getUsersCollection();
-  return users.findOne({ _id: issuer });
+export async function getUserDocumentByIssuer(issuer: string) {
+  return db.user.findUnique({
+    where: { issuer },
+  });
 }
 
-export async function getUserDocumentByEmail(
-  email: string,
-): Promise<UserDocument | null> {
-  const users = await getUsersCollection();
-  return users.findOne({ email: normalizeEmail(email) });
+export async function getUserDocumentByEmail(email: string) {
+  return db.user.findUnique({
+    where: { normalizedEmail: normalizeEmail(email) },
+  });
 }
 
 export async function updateUserProfileByIssuer(input: {
@@ -101,87 +105,100 @@ export async function updateUserProfileByIssuer(input: {
   displayName: string;
   email: string;
 }): Promise<UserProfile | null> {
-  const users = await getUsersCollection();
-  const now = new Date();
   const normalizedEmail = normalizeEmail(input.email);
-  const normalizedDisplayName = input.displayName.trim();
+  const trimmedDisplayName = input.displayName.trim();
 
-  await users.updateOne(
-    { _id: input.issuer },
-    {
-      $set: {
-        displayName: normalizedDisplayName,
-        email: normalizedEmail,
-        updatedAt: now,
-      },
+  const user = await db.user.update({
+    where: { issuer: input.issuer },
+    data: {
+      email: normalizedEmail,
+      normalizedEmail,
+      name: trimmedDisplayName,
     },
-  );
+    select: {
+      id: true,
+      email: true,
+      name: true,
+    },
+  });
 
-  return getUserByIssuer(input.issuer);
+  return mapPrismaUserToUserProfile(user);
 }
 
 export async function deleteUserByIssuer(issuer: string): Promise<boolean> {
-  const users = await getUsersCollection();
-  const result = await users.deleteOne({ _id: issuer });
-  return result.deletedCount === 1;
+  const user = await db.user.findUnique({
+    where: { issuer },
+    select: { id: true },
+  });
+
+  if (!user) {
+    return false;
+  }
+
+  await db.$transaction([
+    db.inviteCode.deleteMany({
+      where: { createdByUserId: user.id },
+    }),
+    db.inviteCode.updateMany({
+      where: { redeemedByUserId: user.id },
+      data: { redeemedByUserId: null },
+    }),
+    db.user.updateMany({
+      where: { invitedByUserId: user.id },
+      data: { invitedByUserId: null },
+    }),
+    db.user.delete({
+      where: { id: user.id },
+    }),
+  ]);
+
+  return true;
 }
 
 export async function countUsers(): Promise<number> {
-  const users = await getUsersCollection();
-  return users.countDocuments({});
+  return db.user.count();
 }
 
 export async function findDuplicateNormalizedEmails(): Promise<
   DuplicateEmailReportItem[]
 > {
-  const users = await getUsersCollection({ skipIndexSetup: true });
+  const users = await db.user.findMany({
+    select: {
+      issuer: true,
+      normalizedEmail: true,
+    },
+  });
 
-  const duplicates = await users
-    .aggregate<{
-      _id: string;
-      count: number;
-      issuers: string[];
-    }>([
-      {
-        $project: {
-          _id: 1,
-          normalizedEmail: {
-            $toLower: {
-              $trim: {
-                input: "$email",
-              },
-            },
-          },
-        },
-      },
-      {
-        $match: {
-          normalizedEmail: { $ne: "" },
-        },
-      },
-      {
-        $group: {
-          _id: "$normalizedEmail",
-          count: { $sum: 1 },
-          issuers: { $push: "$_id" },
-        },
-      },
-      {
-        $match: {
-          count: { $gt: 1 },
-        },
-      },
-      {
-        $sort: {
-          _id: 1,
-        },
-      },
-    ])
-    .toArray();
+  const counts = new Map<string, { count: number; issuers: string[] }>();
 
-  return duplicates.map((item) => ({
-    email: item._id,
-    count: item.count,
-    issuers: item.issuers,
-  }));
+  for (const user of users) {
+    const email = normalizeEmail(user.normalizedEmail);
+
+    if (!email) {
+      continue;
+    }
+
+    const existing = counts.get(email);
+
+    if (existing) {
+      existing.count += 1;
+      if (user.issuer) {
+        existing.issuers.push(user.issuer);
+      }
+    } else {
+      counts.set(email, {
+        count: 1,
+        issuers: user.issuer ? [user.issuer] : [],
+      });
+    }
+  }
+
+  return Array.from(counts.entries())
+    .filter(([, value]) => value.count > 1)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([email, value]) => ({
+      email,
+      count: value.count,
+      issuers: value.issuers,
+    }));
 }

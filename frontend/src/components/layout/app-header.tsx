@@ -48,9 +48,8 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
 
     return (
       titles[pathname] ?? {
-        title: "Workspace",
-        subtitle:
-          "A calmer workspace for reviewing and moving decisions forward.",
+        title: "Invitation code",
+        subtitle: "Your shareable access code will appear here when available.",
       }
     );
   }, [pathname]);

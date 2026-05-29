@@ -151,13 +151,6 @@ export default function SettingsClient({ user }: SettingsClientProps) {
           gap: 24,
         }}
       >
-        <header style={{ display: "grid", gap: 8 }}>
-          <h1 style={{ fontSize: 32, lineHeight: 1.1 }}>Settings</h1>
-          <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-            Manage your account details and permanent account actions.
-          </p>
-        </header>
-
         <section
           style={{
             background: "white",

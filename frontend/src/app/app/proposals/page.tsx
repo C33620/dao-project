@@ -12,11 +12,11 @@ export default async function ProposalsPage() {
       <div className="page-shell__content">
         <SectionCard
           title="Create a proposal"
-          description="Start a new proposal for the group to review and vote on."
+          description="Add a new proposal for the group to consider."
         >
           <CreateProposalEntryCard
             origin="proposals"
-            description="Use the guided flow to prepare a proposal, review the change, and submit it from one place."
+            description="Write a proposal for the group to review and vote on."
           />
         </SectionCard>
 

@@ -26,6 +26,11 @@ export const appNav: AppNavItem[] = [
     description: "Your recent activity",
   },
   {
+    title: "Invitation code",
+    href: "/app/invitation-code",
+    description: "Your current access code",
+  },
+  {
     title: "Settings",
     href: "/app/settings",
     description: "Account and session details",

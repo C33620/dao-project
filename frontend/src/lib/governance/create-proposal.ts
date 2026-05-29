@@ -1,49 +1,38 @@
 import myGovernorAbi from "@/abi/MyGovernor.json";
-import {
-  APPROX_SECONDS_PER_BLOCK,
-  MIN_VOTING_PERIOD_BLOCKS,
-  MY_GOVERNOR_ADDRESS,
-} from "@/lib/web3/contracts";
-import { encodeFunctionData } from "viem";
+import { MY_GOVERNOR_ADDRESS } from "@/lib/web3/contracts";
+import { encodeFunctionData, keccak256, stringToHex } from "viem";
 
 export type ProposalOrigin = "dashboard" | "proposals";
 
-export function hoursToBlocks(hours: number): number {
-  if (!Number.isFinite(hours) || hours <= 0) {
-    return MIN_VOTING_PERIOD_BLOCKS;
+export function buildProposalTitle(input: string) {
+  const trimmed = input.trim();
+  return trimmed.length > 0 ? trimmed : "Untitled proposal";
+}
+
+export function buildProposalSummary(input: string) {
+  return input.trim();
+}
+
+export function buildProposalDescription(input: {
+  proposalText: string;
+  details: string;
+}) {
+  const sections = [buildProposalTitle(input.proposalText), ""];
+
+  if (input.details.trim().length > 0) {
+    sections.push(buildProposalSummary(input.details), "");
   }
 
-  return Math.max(
-    MIN_VOTING_PERIOD_BLOCKS,
-    Math.round((hours * 60 * 60) / APPROX_SECONDS_PER_BLOCK),
-  );
+  sections.push("Submitted through the governance proposal flow.");
+
+  return sections.join("\n");
 }
 
-export function blocksToApproxHours(blocks: bigint | number): number {
-  const numericBlocks = typeof blocks === "bigint" ? Number(blocks) : blocks;
-  return Number(((numericBlocks * APPROX_SECONDS_PER_BLOCK) / 3600).toFixed(1));
-}
-
-export function buildVotingPeriodProposalDescription(input: {
-  title: string;
-  summary: string;
-  newVotingPeriodBlocks: number;
-  newVotingPeriodHours: number;
-}) {
-  return [
-    input.title.trim(),
-    "",
-    input.summary.trim(),
-    "",
-    `Requested change: update the voting period to approximately ${input.newVotingPeriodHours} hours (${input.newVotingPeriodBlocks} blocks).`,
-  ].join("\n");
-}
-
-export function buildVotingPeriodProposalAction(newVotingPeriodBlocks: number) {
+export function buildProposalAction() {
   const calldata = encodeFunctionData({
     abi: myGovernorAbi,
     functionName: "setVotingPeriod",
-    args: [newVotingPeriodBlocks],
+    args: [2900],
   });
 
   return {
@@ -51,6 +40,10 @@ export function buildVotingPeriodProposalAction(newVotingPeriodBlocks: number) {
     values: [BigInt(0)],
     calldatas: [calldata],
   };
+}
+
+export function buildDescriptionHash(description: string) {
+  return keccak256(stringToHex(description));
 }
 
 export function getProposalReturnHref(origin: ProposalOrigin) {
