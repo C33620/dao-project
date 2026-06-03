@@ -8,7 +8,7 @@ type TreasuryQueueItem = {
   status: "PENDING" | "FAILED_RETRYABLE" | "PAUSED" | "SUBMITTED" | string;
   walletAddress: string;
   amountBaseUnits: string;
-  tokenAddress: string;
+  tokenAddress: string | null;
   chainId: number;
   txHash: string | null;
   submittedAt: string | Date | null;
@@ -88,6 +88,14 @@ function getSepoliaAddressUrl(address: string) {
 
 function getSepoliaTxUrl(txHash: string) {
   return `https://sepolia.etherscan.io/tx/${txHash}`;
+}
+
+function getKindLabel(kind: string) {
+  return kind.replaceAll("_", " ");
+}
+
+function getAssetLabel(item: TreasuryQueueItem) {
+  return item.tokenAddress ? "Token" : "Sepolia ETH";
 }
 
 export function TreasuryQueue({
@@ -238,8 +246,8 @@ export function TreasuryQueue({
           <div>
             <h2 className="section-card__title">Pending</h2>
             <p className="section-card__description">
-              Review queued initial allocations, send the transfer in MetaMask,
-              then record the transaction hash here.
+              Copy the exact transfer details, send the transfer in MetaMask,
+              then paste the transaction hash here.
             </p>
           </div>
 
@@ -257,123 +265,174 @@ export function TreasuryQueue({
               <div className="empty-state__icon">✓</div>
               <h2>No pending treasury items</h2>
               <p>
-                All queued allocations have already been submitted or
-                reconciled.
+                All queued allocations and gas funding items have already been
+                submitted or reconciled.
               </p>
             </div>
           ) : (
             <div className="treasury-queue__list">
-              {pendingItems.map((item) => (
-                <article key={item.id} className="treasury-row">
-                  <div className="treasury-row__top">
-                    <div className="treasury-row__identity">
-                      <p className="treasury-row__eyebrow">
-                        {item.kind.replaceAll("_", " ")}
-                      </p>
-                      <h3 className="treasury-row__title">
-                        {item.user.displayName || "Unnamed member"}
-                      </h3>
-                      <p className="treasury-row__subtitle">
-                        {item.user.email || "No email recorded"}
-                      </p>
+              {pendingItems.map((item) => {
+                const formattedAmount = formatAmountBaseUnits(
+                  item.amountBaseUnits,
+                );
+
+                return (
+                  <article key={item.id} className="treasury-row">
+                    <div className="treasury-row__top">
+                      <div className="treasury-row__identity">
+                        <p className="treasury-row__eyebrow">
+                          {getKindLabel(item.kind)}
+                        </p>
+                        <h3 className="treasury-row__title">
+                          {item.user.displayName || "Unnamed member"}
+                        </h3>
+                        <p className="treasury-row__subtitle">
+                          {item.user.email || "No email recorded"}
+                        </p>
+                      </div>
+
+                      <span className={getStatusBadgeClass(item.status)}>
+                        <span className="status-badge__dot" />
+                        <span className="status-badge__label">
+                          {item.status}
+                        </span>
+                      </span>
                     </div>
 
-                    <span className={getStatusBadgeClass(item.status)}>
-                      <span className="status-badge__dot" />
-                      <span className="status-badge__label">{item.status}</span>
-                    </span>
-                  </div>
+                    <dl className="treasury-row__meta">
+                      <div>
+                        <dt>Recipient</dt>
+                        <dd>{item.walletAddress}</dd>
+                      </div>
+                      <div>
+                        <dt>Amount</dt>
+                        <dd>{formattedAmount}</dd>
+                      </div>
+                      <div>
+                        <dt>Asset</dt>
+                        <dd>{getAssetLabel(item)}</dd>
+                      </div>
+                      <div>
+                        <dt>Chain</dt>
+                        <dd>{item.chainId}</dd>
+                      </div>
+                      {item.tokenAddress ? (
+                        <div className="treasury-row__meta--full">
+                          <dt>Token address</dt>
+                          <dd>{item.tokenAddress}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
 
-                  <dl className="treasury-row__meta">
-                    <div>
-                      <dt>Recipient</dt>
-                      <dd>{item.walletAddress}</dd>
-                    </div>
-                    <div>
-                      <dt>Amount</dt>
-                      <dd>{formatAmountBaseUnits(item.amountBaseUnits)}</dd>
-                    </div>
-                    <div>
-                      <dt>Token</dt>
-                      <dd>{item.tokenAddress}</dd>
-                    </div>
-                    <div>
-                      <dt>Chain</dt>
-                      <dd>{item.chainId}</dd>
-                    </div>
-                    <div>
-                      <dt>Created</dt>
-                      <dd>{formatDateTime(item.createdAt)}</dd>
-                    </div>
-                    <div>
-                      <dt>Updated</dt>
-                      <dd>{formatDateTime(item.updatedAt)}</dd>
-                    </div>
-                  </dl>
-
-                  <div className="button-row treasury-row__utility-actions">
-                    <button
-                      type="button"
-                      className="button button--secondary"
-                      onClick={() =>
-                        handleCopy(item.walletAddress, "Recipient address")
-                      }
-                    >
-                      Copy recipient
-                    </button>
-
-                    <a
-                      className="button button--secondary"
-                      href={getSepoliaAddressUrl(item.walletAddress)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Open recipient
-                    </a>
-
-                    <a
-                      className="button button--secondary"
-                      href={getSepoliaAddressUrl(item.tokenAddress)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Open token
-                    </a>
-                  </div>
-
-                  <div className="treasury-row__submit">
-                    <label
-                      className="treasury-row__field"
-                      htmlFor={`txHash-${item.id}`}
-                    >
-                      <span>Transaction hash</span>
-                      <input
-                        id={`txHash-${item.id}`}
-                        type="text"
-                        value={txHashes[item.id] ?? ""}
-                        onChange={(event) =>
-                          setTxHashes((current) => ({
-                            ...current,
-                            [item.id]: event.target.value,
-                          }))
+                    <div className="button-row treasury-row__utility-actions">
+                      <button
+                        type="button"
+                        className="button button--secondary"
+                        onClick={() =>
+                          handleCopy(item.walletAddress, "Recipient address")
                         }
-                        placeholder="0x..."
-                        autoComplete="off"
-                        spellCheck={false}
-                      />
-                    </label>
+                      >
+                        Copy recipient
+                      </button>
 
-                    <button
-                      type="button"
-                      className="button button--primary"
-                      onClick={() => handleSubmit(item.id)}
-                      disabled={loadingId === item.id}
-                    >
-                      {loadingId === item.id ? "Saving..." : "Mark submitted"}
-                    </button>
-                  </div>
-                </article>
-              ))}
+                      <button
+                        type="button"
+                        className="button button--secondary"
+                        onClick={() => handleCopy(formattedAmount, "Amount")}
+                      >
+                        Copy amount
+                      </button>
+
+                      {item.tokenAddress ? (
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          onClick={() =>
+                            handleCopy(item.tokenAddress!, "Token address")
+                          }
+                        >
+                          Copy token
+                        </button>
+                      ) : null}
+
+                      <a
+                        className="button button--secondary"
+                        href={getSepoliaAddressUrl(item.walletAddress)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Open recipient
+                      </a>
+
+                      {item.tokenAddress ? (
+                        <a
+                          className="button button--secondary"
+                          href={getSepoliaAddressUrl(item.tokenAddress)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Open token
+                        </a>
+                      ) : null}
+                    </div>
+
+                    <details className="treasury-row__details">
+                      <summary>Details</summary>
+
+                      <dl className="treasury-row__meta treasury-row__meta--details">
+                        <div>
+                          <dt>Created</dt>
+                          <dd>{formatDateTime(item.createdAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Updated</dt>
+                          <dd>{formatDateTime(item.updatedAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Attempts</dt>
+                          <dd>{item.attemptCount}</dd>
+                        </div>
+                        <div>
+                          <dt>Account setup</dt>
+                          <dd>{item.user.accountSetupStatus}</dd>
+                        </div>
+                      </dl>
+                    </details>
+
+                    <div className="treasury-row__submit">
+                      <label
+                        className="treasury-row__field"
+                        htmlFor={`txHash-${item.id}`}
+                      >
+                        <span>Transaction hash</span>
+                        <input
+                          id={`txHash-${item.id}`}
+                          type="text"
+                          value={txHashes[item.id] ?? ""}
+                          onChange={(event) =>
+                            setTxHashes((current) => ({
+                              ...current,
+                              [item.id]: event.target.value,
+                            }))
+                          }
+                          placeholder="0x..."
+                          autoComplete="off"
+                          spellCheck={false}
+                        />
+                      </label>
+
+                      <button
+                        type="button"
+                        className="button button--primary"
+                        onClick={() => handleSubmit(item.id)}
+                        disabled={loadingId === item.id}
+                      >
+                        {loadingId === item.id ? "Saving..." : "Mark submitted"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           )}
         </div>
@@ -420,64 +479,127 @@ export function TreasuryQueue({
             </div>
           ) : (
             <div className="treasury-queue__list">
-              {submittedItems.map((item) => (
-                <article key={item.id} className="treasury-row">
-                  <div className="treasury-row__top">
-                    <div className="treasury-row__identity">
-                      <p className="treasury-row__eyebrow">
-                        {item.kind.replaceAll("_", " ")}
-                      </p>
-                      <h3 className="treasury-row__title">
-                        {item.user.displayName || "Unnamed member"}
-                      </h3>
-                      <p className="treasury-row__subtitle">
-                        {item.user.email || "No email recorded"}
-                      </p>
+              {submittedItems.map((item) => {
+                const formattedAmount = formatAmountBaseUnits(
+                  item.amountBaseUnits,
+                );
+
+                return (
+                  <article key={item.id} className="treasury-row">
+                    <div className="treasury-row__top">
+                      <div className="treasury-row__identity">
+                        <p className="treasury-row__eyebrow">
+                          {getKindLabel(item.kind)}
+                        </p>
+                        <h3 className="treasury-row__title">
+                          {item.user.displayName || "Unnamed member"}
+                        </h3>
+                        <p className="treasury-row__subtitle">
+                          {item.user.email || "No email recorded"}
+                        </p>
+                      </div>
+
+                      <span className={getStatusBadgeClass(item.status)}>
+                        <span className="status-badge__dot" />
+                        <span className="status-badge__label">
+                          {item.status}
+                        </span>
+                      </span>
                     </div>
 
-                    <span className={getStatusBadgeClass(item.status)}>
-                      <span className="status-badge__dot" />
-                      <span className="status-badge__label">{item.status}</span>
-                    </span>
-                  </div>
+                    <dl className="treasury-row__meta">
+                      <div>
+                        <dt>Recipient</dt>
+                        <dd>{item.walletAddress}</dd>
+                      </div>
+                      <div>
+                        <dt>Amount</dt>
+                        <dd>{formattedAmount}</dd>
+                      </div>
+                      <div>
+                        <dt>Asset</dt>
+                        <dd>{getAssetLabel(item)}</dd>
+                      </div>
+                      <div>
+                        <dt>Submitted</dt>
+                        <dd>{formatDateTime(item.submittedAt)}</dd>
+                      </div>
+                      <div className="treasury-row__meta--full">
+                        <dt>Transaction hash</dt>
+                        <dd>{item.txHash || "—"}</dd>
+                      </div>
+                    </dl>
 
-                  <dl className="treasury-row__meta">
-                    <div>
-                      <dt>Recipient</dt>
-                      <dd>{item.walletAddress}</dd>
-                    </div>
-                    <div>
-                      <dt>Amount</dt>
-                      <dd>{formatAmountBaseUnits(item.amountBaseUnits)}</dd>
-                    </div>
-                    <div>
-                      <dt>Submitted</dt>
-                      <dd>{formatDateTime(item.submittedAt)}</dd>
-                    </div>
-                    <div>
-                      <dt>Updated</dt>
-                      <dd>{formatDateTime(item.updatedAt)}</dd>
-                    </div>
-                    <div className="treasury-row__meta--full">
-                      <dt>Transaction hash</dt>
-                      <dd>{item.txHash || "—"}</dd>
-                    </div>
-                  </dl>
-
-                  <div className="button-row treasury-row__utility-actions">
-                    {item.txHash ? (
-                      <a
+                    <div className="button-row treasury-row__utility-actions">
+                      <button
+                        type="button"
                         className="button button--secondary"
-                        href={getSepoliaTxUrl(item.txHash)}
-                        target="_blank"
-                        rel="noopener noreferrer"
+                        onClick={() =>
+                          handleCopy(item.walletAddress, "Recipient address")
+                        }
                       >
-                        Open transaction
-                      </a>
-                    ) : null}
-                  </div>
-                </article>
-              ))}
+                        Copy recipient
+                      </button>
+
+                      <button
+                        type="button"
+                        className="button button--secondary"
+                        onClick={() => handleCopy(formattedAmount, "Amount")}
+                      >
+                        Copy amount
+                      </button>
+
+                      {item.txHash ? (
+                        <>
+                          <button
+                            type="button"
+                            className="button button--secondary"
+                            onClick={() =>
+                              handleCopy(item.txHash!, "Transaction hash")
+                            }
+                          >
+                            Copy tx hash
+                          </button>
+
+                          <a
+                            className="button button--secondary"
+                            href={getSepoliaTxUrl(item.txHash)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Open transaction
+                          </a>
+                        </>
+                      ) : null}
+                    </div>
+
+                    <details className="treasury-row__details">
+                      <summary>Details</summary>
+
+                      <dl className="treasury-row__meta treasury-row__meta--details">
+                        <div>
+                          <dt>Updated</dt>
+                          <dd>{formatDateTime(item.updatedAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Confirmed</dt>
+                          <dd>{formatDateTime(item.confirmedAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Chain</dt>
+                          <dd>{item.chainId}</dd>
+                        </div>
+                        {item.tokenAddress ? (
+                          <div className="treasury-row__meta--full">
+                            <dt>Token address</dt>
+                            <dd>{item.tokenAddress}</dd>
+                          </div>
+                        ) : null}
+                      </dl>
+                    </details>
+                  </article>
+                );
+              })}
             </div>
           )}
         </div>

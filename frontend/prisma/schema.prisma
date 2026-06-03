@@ -29,6 +29,7 @@ enum AccountSetupEventType {
 
 enum TreasuryDistributionKind {
   INITIAL_ALLOCATION
+  INITIAL_GAS_FUNDING
 }
 
 enum TreasuryDistributionStatus {
@@ -50,6 +51,15 @@ enum TreasuryAuditEventType {
   INITIAL_ALLOCATION_CONFIRMED
   INITIAL_ALLOCATION_FAILED
   INITIAL_ALLOCATION_RETRY_SCHEDULED
+
+  INITIAL_GAS_FUNDING_QUEUED
+  INITIAL_GAS_FUNDING_BLOCKED_PAUSED
+  INITIAL_GAS_FUNDING_BLOCKED_ALREADY_FUNDED
+  INITIAL_GAS_FUNDING_REQUESTED
+  INITIAL_GAS_FUNDING_SUBMITTED
+  INITIAL_GAS_FUNDING_CONFIRMED
+  INITIAL_GAS_FUNDING_FAILED
+  INITIAL_GAS_FUNDING_RETRY_SCHEDULED
 }
 
 enum UserRole {
@@ -58,6 +68,73 @@ enum UserRole {
   ADMIN
   VIEWER
 }
+
+enum AccountCloseAttemptStatus {
+  PREPARED
+  AUTHORIZATION_SIGNED
+  AUTHORIZATION_STORED
+  EXECUTION_QUEUED
+  EXECUTION_SUBMITTED
+  EXECUTION_CONFIRMED
+  FINALIZED
+  EXPIRED
+  FAILED
+}
+
+model AccountCloseAttempt {
+  id                            String                     @id @default(auto()) @map("_id") @db.ObjectId
+  attemptKey                    String                     @unique
+
+  userId                        String                     @db.ObjectId
+  issuer                        String
+  walletAddress                 String
+
+  chainId                       Int
+  recipientAddress              String
+
+  delegateContractAddress       String
+  relayerAddress                String?
+  closeDeadline                 DateTime?
+
+  authorizationNonce            String?
+  authorizationChainId          Int?
+  authorizationContractAddress  String?
+  authorizationV                Int?
+  authorizationR                String?
+  authorizationS                String?
+  authorizationSignedAt         DateTime?
+  authorizationStoredAt         DateTime?
+
+  closeIntentRelayer            String?
+  closeIntentNonce              String?
+  closeIntentDeadline           DateTime?
+  closeIntentSignature          String?
+
+  executionTxHash               String?
+  executionBlockNumber          Int?
+  executionQueuedAt             DateTime?
+  executionSubmittedAt          DateTime?
+  executionConfirmedAt          DateTime?
+
+  status                        AccountCloseAttemptStatus  @default(PREPARED)
+  expiresAt                     DateTime
+  finalizedAt                   DateTime?
+
+  lastErrorCode                 String?
+  lastErrorMessage              String?
+
+  createdAt                     DateTime                   @default(now())
+  updatedAt                     DateTime                   @updatedAt
+
+  @@index([userId, status])
+  @@index([status, updatedAt])
+  @@index([issuer])
+  @@index([expiresAt])
+  @@index([executionTxHash])
+  @@index([relayerAddress])
+}
+
+
 
 model User {
   id                      String                      @id @default(auto()) @map("_id") @db.ObjectId
@@ -136,7 +213,7 @@ model TreasuryDistribution {
   status           TreasuryDistributionStatus @default(PENDING)
 
   amountBaseUnits  String
-  tokenAddress     String
+  tokenAddress     String?
   chainId          Int
   walletAddress    String
 

@@ -245,6 +245,22 @@ export default function AuthPage() {
     }
   }
 
+  const submitLabel = useMemo(() => {
+    if (status === "submitting") {
+      return mode === "existing" ? "Signing in..." : "Creating account...";
+    }
+
+    if (mode === "existing") {
+      return "Sign in";
+    }
+
+    if (requiresInviteCode === true && !inviteCode.trim()) {
+      return "Continue";
+    }
+
+    return "Create account";
+  }, [status, mode, requiresInviteCode, inviteCode]);
+
   return (
     <main
       className="landing-page"
@@ -517,13 +533,7 @@ export default function AuthPage() {
                 disabled={status === "submitting"}
                 style={{ minWidth: 180 }}
               >
-                {status === "submitting"
-                  ? "Signing in..."
-                  : mode === "existing"
-                  ? "Continue"
-                  : requiresInviteCode === true && !inviteCode
-                  ? "Continue"
-                  : "Create account"}
+                {submitLabel}
               </button>
             </div>
           </form>

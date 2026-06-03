@@ -9,37 +9,159 @@ import {
   TreasuryDistributionStatus,
 } from "@prisma/client";
 
-const DISTRIBUTION_KIND = TreasuryDistributionKind.INITIAL_ALLOCATION;
+const INITIAL_ALLOCATION_KIND = TreasuryDistributionKind.INITIAL_ALLOCATION;
+const INITIAL_GAS_FUNDING_KIND = TreasuryDistributionKind.INITIAL_GAS_FUNDING;
 
-type QueueInitialAllocationInput = {
+const REQUIRED_SETUP_KINDS = [
+  INITIAL_ALLOCATION_KIND,
+  INITIAL_GAS_FUNDING_KIND,
+] as const;
+
+type QueueInitialFundingInput = {
   userId: string;
   normalizedEmail: string;
   issuer: string;
   walletAddress: string;
 };
 
-export async function queueInitialAllocationForUser(
-  input: QueueInitialAllocationInput,
-) {
-  const tokenAddress = process.env.GOVERNANCE_TOKEN_ADDRESS;
-  const chainId = Number(process.env.TREASURY_CHAIN_ID ?? 11155111);
-  const amountBaseUnits = process.env.TREASURY_INITIAL_ALLOCATION_BASE_UNITS;
-  const distributionPaused =
-    String(process.env.TREASURY_DISTRIBUTION_PAUSED ?? "false") === "true";
+type DistributionConfig = {
+  kind: TreasuryDistributionKind;
+  amountBaseUnits: string;
+  tokenAddress?: string | null;
+  queuedEvent: TreasuryAuditEventType;
+  blockedPausedEvent: TreasuryAuditEventType;
+  blockedAlreadyFundedEvent: TreasuryAuditEventType;
+  submittedEvent: TreasuryAuditEventType;
+  confirmedEvent: TreasuryAuditEventType;
+  failedEvent: TreasuryAuditEventType;
+  idempotencyKey: string;
+};
 
-  if (!tokenAddress || !amountBaseUnits) {
+function getTreasuryChainId() {
+  return Number(process.env.TREASURY_CHAIN_ID ?? 11155111);
+}
+
+function isDistributionPaused() {
+  return String(process.env.TREASURY_DISTRIBUTION_PAUSED ?? "false") === "true";
+}
+
+function getRequiredDistributionConfigs(userId: string): DistributionConfig[] {
+  const tokenAddress = process.env.GOVERNANCE_TOKEN_ADDRESS;
+  const allocationAmountBaseUnits =
+    process.env.TREASURY_INITIAL_ALLOCATION_BASE_UNITS;
+  const gasAmountBaseUnits = process.env.TREASURY_INITIAL_GAS_FUNDING_WEI;
+
+  if (!tokenAddress || !allocationAmountBaseUnits || !gasAmountBaseUnits) {
     throw new Error(
-      "Treasury queue configuration is incomplete. Missing token address or base-unit amount.",
+      "Treasury queue configuration is incomplete. Missing token address, token amount, or gas amount.",
     );
   }
 
-  const idempotencyKey = `initial-allocation:${input.userId}`;
+  return [
+    {
+      kind: INITIAL_ALLOCATION_KIND,
+      amountBaseUnits: allocationAmountBaseUnits,
+      tokenAddress,
+      queuedEvent: TreasuryAuditEventType.INITIAL_ALLOCATION_QUEUED,
+      blockedPausedEvent:
+        TreasuryAuditEventType.INITIAL_ALLOCATION_BLOCKED_PAUSED,
+      blockedAlreadyFundedEvent:
+        TreasuryAuditEventType.INITIAL_ALLOCATION_BLOCKED_ALREADY_FUNDED,
+      submittedEvent: TreasuryAuditEventType.INITIAL_ALLOCATION_SUBMITTED,
+      confirmedEvent: TreasuryAuditEventType.INITIAL_ALLOCATION_CONFIRMED,
+      failedEvent: TreasuryAuditEventType.INITIAL_ALLOCATION_FAILED,
+      idempotencyKey: `initial-allocation:${userId}`,
+    },
+    {
+      kind: INITIAL_GAS_FUNDING_KIND,
+      amountBaseUnits: gasAmountBaseUnits,
+      tokenAddress: null,
+      queuedEvent: TreasuryAuditEventType.INITIAL_GAS_FUNDING_QUEUED,
+      blockedPausedEvent:
+        TreasuryAuditEventType.INITIAL_GAS_FUNDING_BLOCKED_PAUSED,
+      blockedAlreadyFundedEvent:
+        TreasuryAuditEventType.INITIAL_GAS_FUNDING_BLOCKED_ALREADY_FUNDED,
+      submittedEvent: TreasuryAuditEventType.INITIAL_GAS_FUNDING_SUBMITTED,
+      confirmedEvent: TreasuryAuditEventType.INITIAL_GAS_FUNDING_CONFIRMED,
+      failedEvent: TreasuryAuditEventType.INITIAL_GAS_FUNDING_FAILED,
+      idempotencyKey: `initial-gas-funding:${userId}`,
+    },
+  ];
+}
+
+async function recomputeUserTreasurySetup(userId: string) {
+  const rows = await db.treasuryDistribution.findMany({
+    where: {
+      userId,
+      kind: { in: [...REQUIRED_SETUP_KINDS] },
+    },
+    select: {
+      kind: true,
+      status: true,
+      txHash: true,
+      confirmedAt: true,
+      updatedAt: true,
+    },
+  });
+
+  const byKind = new Map(rows.map((row) => [row.kind, row]));
+  const allocation = byKind.get(INITIAL_ALLOCATION_KIND);
+  const gasFunding = byKind.get(INITIAL_GAS_FUNDING_KIND);
+
+  const hasAllRequired = REQUIRED_SETUP_KINDS.every((kind) => byKind.has(kind));
+
+  const anyNeedsAttention = rows.some(
+    (row) =>
+      row.status === TreasuryDistributionStatus.FAILED_FINAL ||
+      row.status === TreasuryDistributionStatus.PAUSED,
+  );
+
+  const allSucceeded =
+    hasAllRequired &&
+    REQUIRED_SETUP_KINDS.every(
+      (kind) =>
+        byKind.get(kind)?.status === TreasuryDistributionStatus.SUCCEEDED,
+    );
+
+  const accountSetupStatus = allSucceeded
+    ? AccountSetupStatus.READY
+    : anyNeedsAttention
+    ? AccountSetupStatus.NEEDS_ATTENTION
+    : AccountSetupStatus.PENDING;
+
+  await db.user.update({
+    where: { id: userId },
+    data: {
+      initialAllocationStatus: allocation?.status ?? null,
+      initialAllocationAt:
+        allocation?.status === TreasuryDistributionStatus.SUCCEEDED
+          ? allocation.confirmedAt ?? allocation.updatedAt
+          : null,
+      initialAllocationTxHash: allocation?.txHash ?? null,
+      accountSetupStatus,
+      accountSetupUpdatedAt: new Date(),
+    },
+  });
+
+  return {
+    accountSetupStatus,
+    allocationStatus: allocation?.status ?? null,
+    gasFundingStatus: gasFunding?.status ?? null,
+  };
+}
+
+async function queueSingleDistributionForUser(
+  input: QueueInitialFundingInput,
+  config: DistributionConfig,
+) {
+  const chainId = getTreasuryChainId();
+  const distributionPaused = isDistributionPaused();
 
   const existing = await db.treasuryDistribution.findUnique({
     where: {
       userId_kind: {
         userId: input.userId,
-        kind: DISTRIBUTION_KIND,
+        kind: config.kind,
       },
     },
   });
@@ -47,32 +169,22 @@ export async function queueInitialAllocationForUser(
   if (existing?.status === TreasuryDistributionStatus.SUCCEEDED) {
     await writeTreasuryAuditEvent({
       userId: input.userId,
-      type: TreasuryAuditEventType.INITIAL_ALLOCATION_BLOCKED_ALREADY_FUNDED,
+      type: config.blockedAlreadyFundedEvent,
       normalizedEmail: input.normalizedEmail,
       issuer: input.issuer,
       walletAddress: input.walletAddress,
-      kind: DISTRIBUTION_KIND,
+      kind: config.kind,
       amountBaseUnits: existing.amountBaseUnits,
-      tokenAddress: existing.tokenAddress,
+      tokenAddress: existing.tokenAddress ?? undefined,
       chainId: existing.chainId,
       txHash: existing.txHash ?? undefined,
-      idempotencyKey,
-    });
-
-    await db.user.update({
-      where: { id: input.userId },
-      data: {
-        initialAllocationStatus: TreasuryDistributionStatus.SUCCEEDED,
-        initialAllocationAt: existing.confirmedAt ?? existing.updatedAt,
-        initialAllocationTxHash: existing.txHash ?? undefined,
-        accountSetupStatus: AccountSetupStatus.READY,
-        accountSetupUpdatedAt: new Date(),
-      },
+      idempotencyKey: config.idempotencyKey,
     });
 
     return {
       status: "already_funded" as const,
-      setupStatus: "ready" as const,
+      distribution: existing,
+      paused: false,
     };
   }
 
@@ -85,58 +197,37 @@ export async function queueInitialAllocationForUser(
         where: { id: existing.id },
         data: {
           walletAddress: input.walletAddress,
-          tokenAddress,
+          tokenAddress: config.tokenAddress ?? null,
           chainId,
-          amountBaseUnits,
-          status: existing.status,
+          amountBaseUnits: config.amountBaseUnits,
           processedAt: new Date(),
         },
       })
     : await db.treasuryDistribution.create({
         data: {
           userId: input.userId,
-          kind: DISTRIBUTION_KIND,
+          kind: config.kind,
           status: nextStatus,
-          amountBaseUnits,
-          tokenAddress,
+          amountBaseUnits: config.amountBaseUnits,
+          tokenAddress: config.tokenAddress ?? null,
           chainId,
           walletAddress: input.walletAddress,
-          idempotencyKey,
+          idempotencyKey: config.idempotencyKey,
           processedAt: new Date(),
         },
       });
 
-  await db.user.update({
-    where: { id: input.userId },
-    data: {
-      initialAllocationStatus:
-        distribution.status === TreasuryDistributionStatus.SUCCEEDED
-          ? TreasuryDistributionStatus.SUCCEEDED
-          : distribution.status === TreasuryDistributionStatus.FAILED_FINAL
-          ? TreasuryDistributionStatus.FAILED_FINAL
-          : nextStatus,
-      initialAllocationTxHash: distribution.txHash ?? undefined,
-      accountSetupStatus:
-        distribution.status === TreasuryDistributionStatus.SUCCEEDED
-          ? AccountSetupStatus.READY
-          : distribution.status === TreasuryDistributionStatus.FAILED_FINAL
-          ? AccountSetupStatus.NEEDS_ATTENTION
-          : AccountSetupStatus.PENDING,
-      accountSetupUpdatedAt: new Date(),
-    },
-  });
-
   await writeTreasuryAuditEvent({
     userId: input.userId,
-    type: TreasuryAuditEventType.INITIAL_ALLOCATION_QUEUED,
+    type: config.queuedEvent,
     normalizedEmail: input.normalizedEmail,
     issuer: input.issuer,
     walletAddress: input.walletAddress,
-    kind: DISTRIBUTION_KIND,
-    amountBaseUnits,
-    tokenAddress,
+    kind: config.kind,
+    amountBaseUnits: config.amountBaseUnits,
+    tokenAddress: config.tokenAddress ?? undefined,
     chainId,
-    idempotencyKey,
+    idempotencyKey: config.idempotencyKey,
     metadata: {
       mode: "manual-metamask-approval",
       paused: distributionPaused,
@@ -146,27 +237,76 @@ export async function queueInitialAllocationForUser(
   if (distributionPaused) {
     await writeTreasuryAuditEvent({
       userId: input.userId,
-      type: TreasuryAuditEventType.INITIAL_ALLOCATION_BLOCKED_PAUSED,
+      type: config.blockedPausedEvent,
       normalizedEmail: input.normalizedEmail,
       issuer: input.issuer,
       walletAddress: input.walletAddress,
-      kind: DISTRIBUTION_KIND,
-      amountBaseUnits,
-      tokenAddress,
+      kind: config.kind,
+      amountBaseUnits: config.amountBaseUnits,
+      tokenAddress: config.tokenAddress ?? undefined,
       chainId,
-      idempotencyKey,
+      idempotencyKey: config.idempotencyKey,
     });
+  }
 
+  return {
+    status: distributionPaused ? ("paused" as const) : ("queued" as const),
+    distribution,
+    paused: distributionPaused,
+  };
+}
+
+export async function queueInitialFundingForUser(
+  input: QueueInitialFundingInput,
+) {
+  const configs = getRequiredDistributionConfigs(input.userId);
+
+  const results = [];
+  for (const config of configs) {
+    const result = await queueSingleDistributionForUser(input, config);
+    results.push(result);
+  }
+
+  const setup = await recomputeUserTreasurySetup(input.userId);
+
+  if (setup.accountSetupStatus === AccountSetupStatus.READY) {
     return {
-      status: "paused" as const,
-      setupStatus: "finalizing" as const,
+      status: "already_funded" as const,
+      setupStatus: "ready" as const,
     };
   }
 
   return {
-    status: "queued" as const,
-    setupStatus: "finalizing" as const,
-    distributionId: distribution.id,
+    status: results.some((result) => result.paused)
+      ? ("paused" as const)
+      : ("queued" as const),
+    setupStatus:
+      setup.accountSetupStatus === AccountSetupStatus.NEEDS_ATTENTION
+        ? ("needs_attention" as const)
+        : ("finalizing" as const),
+    distributionIds: results.map((result) => result.distribution.id),
+  };
+}
+
+export async function queueInitialAllocationForUser(
+  input: QueueInitialFundingInput,
+) {
+  return queueInitialFundingForUser(input);
+}
+
+function getAuditEventConfig(kind: TreasuryDistributionKind) {
+  if (kind === INITIAL_GAS_FUNDING_KIND) {
+    return {
+      submittedEvent: TreasuryAuditEventType.INITIAL_GAS_FUNDING_SUBMITTED,
+      confirmedEvent: TreasuryAuditEventType.INITIAL_GAS_FUNDING_CONFIRMED,
+      failedEvent: TreasuryAuditEventType.INITIAL_GAS_FUNDING_FAILED,
+    };
+  }
+
+  return {
+    submittedEvent: TreasuryAuditEventType.INITIAL_ALLOCATION_SUBMITTED,
+    confirmedEvent: TreasuryAuditEventType.INITIAL_ALLOCATION_CONFIRMED,
+    failedEvent: TreasuryAuditEventType.INITIAL_ALLOCATION_FAILED,
   };
 }
 
@@ -214,26 +354,20 @@ export async function markInitialAllocationSubmitted(input: {
     },
   });
 
-  await db.user.update({
-    where: { id: distribution.userId },
-    data: {
-      initialAllocationStatus: TreasuryDistributionStatus.SUBMITTED,
-      initialAllocationTxHash: input.txHash,
-      accountSetupStatus: AccountSetupStatus.PENDING,
-      accountSetupUpdatedAt: new Date(),
-    },
-  });
+  await recomputeUserTreasurySetup(distribution.userId);
+
+  const events = getAuditEventConfig(distribution.kind);
 
   await writeTreasuryAuditEvent({
     userId: distribution.userId,
-    type: TreasuryAuditEventType.INITIAL_ALLOCATION_SUBMITTED,
+    type: events.submittedEvent,
     actor: input.adminUserId,
     normalizedEmail: distribution.user.normalizedEmail,
     issuer: distribution.user.issuer ?? undefined,
     walletAddress: distribution.walletAddress,
     kind: distribution.kind,
     amountBaseUnits: distribution.amountBaseUnits,
-    tokenAddress: distribution.tokenAddress,
+    tokenAddress: distribution.tokenAddress ?? undefined,
     chainId: distribution.chainId,
     txHash: input.txHash,
     idempotencyKey: distribution.idempotencyKey,
@@ -249,7 +383,7 @@ export async function reconcileTreasuryDistributions() {
   const { JsonRpcProvider } = await import("ethers");
 
   const rpcUrl = process.env.TREASURY_RPC_URL;
-  const chainId = Number(process.env.TREASURY_CHAIN_ID ?? 11155111);
+  const chainId = getTreasuryChainId();
 
   if (!rpcUrl) {
     throw new Error("TREASURY_RPC_URL is not configured.");
@@ -281,6 +415,8 @@ export async function reconcileTreasuryDistributions() {
       continue;
     }
 
+    const events = getAuditEventConfig(row.kind);
+
     try {
       const receipt = await provider.getTransactionReceipt(row.txHash);
 
@@ -302,26 +438,17 @@ export async function reconcileTreasuryDistributions() {
           },
         });
 
-        await db.user.update({
-          where: { id: row.userId },
-          data: {
-            initialAllocationStatus: TreasuryDistributionStatus.SUCCEEDED,
-            initialAllocationAt: confirmedAt,
-            initialAllocationTxHash: row.txHash,
-            accountSetupStatus: AccountSetupStatus.READY,
-            accountSetupUpdatedAt: confirmedAt,
-          },
-        });
+        await recomputeUserTreasurySetup(row.userId);
 
         await writeTreasuryAuditEvent({
           userId: row.userId,
-          type: TreasuryAuditEventType.INITIAL_ALLOCATION_CONFIRMED,
+          type: events.confirmedEvent,
           normalizedEmail: row.user.normalizedEmail,
           issuer: row.user.issuer ?? undefined,
           walletAddress: row.walletAddress,
           kind: row.kind,
           amountBaseUnits: row.amountBaseUnits,
-          tokenAddress: row.tokenAddress,
+          tokenAddress: row.tokenAddress ?? undefined,
           chainId: row.chainId,
           txHash: row.txHash,
           idempotencyKey: row.idempotencyKey,
@@ -340,24 +467,17 @@ export async function reconcileTreasuryDistributions() {
         },
       });
 
-      await db.user.update({
-        where: { id: row.userId },
-        data: {
-          initialAllocationStatus: TreasuryDistributionStatus.FAILED_RETRYABLE,
-          accountSetupStatus: AccountSetupStatus.PENDING,
-          accountSetupUpdatedAt: new Date(),
-        },
-      });
+      await recomputeUserTreasurySetup(row.userId);
 
       await writeTreasuryAuditEvent({
         userId: row.userId,
-        type: TreasuryAuditEventType.INITIAL_ALLOCATION_FAILED,
+        type: events.failedEvent,
         normalizedEmail: row.user.normalizedEmail,
         issuer: row.user.issuer ?? undefined,
         walletAddress: row.walletAddress,
         kind: row.kind,
         amountBaseUnits: row.amountBaseUnits,
-        tokenAddress: row.tokenAddress,
+        tokenAddress: row.tokenAddress ?? undefined,
         chainId: row.chainId,
         txHash: row.txHash,
         idempotencyKey: row.idempotencyKey,
@@ -372,13 +492,13 @@ export async function reconcileTreasuryDistributions() {
 
       await writeTreasuryAuditEvent({
         userId: row.userId,
-        type: TreasuryAuditEventType.INITIAL_ALLOCATION_FAILED,
+        type: events.failedEvent,
         normalizedEmail: row.user.normalizedEmail,
         issuer: row.user.issuer ?? undefined,
         walletAddress: row.walletAddress,
         kind: row.kind,
         amountBaseUnits: row.amountBaseUnits,
-        tokenAddress: row.tokenAddress,
+        tokenAddress: row.tokenAddress ?? undefined,
         chainId: row.chainId,
         txHash: row.txHash,
         idempotencyKey: row.idempotencyKey,

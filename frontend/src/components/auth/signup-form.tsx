@@ -1,7 +1,6 @@
 "use client";
 
-import { Magic } from "magic-sdk";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 type FormState = {
   error: string | null;
@@ -21,11 +20,6 @@ export function SignupForm() {
   );
   const [inviteCode, setInviteCode] = useState("");
 
-  const magic = useMemo(() => {
-    const key = process.env.NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY;
-    return key ? new Magic(key) : null;
-  }, []);
-
   async function onSubmit(formData: FormData) {
     setState({ error: null, success: null, loading: true });
 
@@ -41,7 +35,17 @@ export function SignupForm() {
       return;
     }
 
-    if (!magic) {
+    if (typeof window === "undefined") {
+      setState({
+        error: "This action is only available in the browser.",
+        success: null,
+        loading: false,
+      });
+      return;
+    }
+
+    const publishableKey = process.env.NEXT_PUBLIC_MAGIC_PUBLISHABLE_KEY;
+    if (!publishableKey) {
       setState({
         error: "Magic is not configured on the frontend.",
         success: null,
@@ -76,6 +80,9 @@ export function SignupForm() {
         });
         return;
       }
+
+      const { Magic } = await import("magic-sdk");
+      const magic = new Magic(publishableKey);
 
       const didToken = await magic.auth.loginWithMagicLink({ email });
 

@@ -10,7 +10,7 @@ type TreasuryQueueItem = {
   status: "PENDING" | "FAILED_RETRYABLE" | "PAUSED" | "SUBMITTED" | string;
   walletAddress: string;
   amountBaseUnits: string;
-  tokenAddress: string;
+  tokenAddress: string | null;
   chainId: number;
   txHash: string | null;
   submittedAt: string | Date | null;
@@ -112,9 +112,10 @@ export default async function AdminTreasuryPage() {
         <div className="page-shell__heading">
           <h1>Treasury operations</h1>
           <p>
-            Record manual Sepolia treasury sends, review queued allocations, and
-            reconcile submitted transfers without changing the current MetaMask
-            signing workflow.
+            Review queued onboarding transfers, copy exact transfer details,
+            record submitted transaction hashes, and reconcile both governance
+            token allocations and Sepolia gas funding without changing the
+            current manual signing workflow.
           </p>
         </div>
       </div>

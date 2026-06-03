@@ -11,7 +11,7 @@ import {
   getRateLimitKey,
   type RateLimitExceededError,
 } from "@/lib/rate-limit";
-import { queueInitialAllocationForUser } from "@/lib/treasury/distribute";
+import { queueInitialFundingForUser } from "@/lib/treasury/distribute";
 import { Magic } from "@magic-sdk/admin";
 import { InviteCodeStatus, Prisma } from "@prisma/client";
 import { SignJWT } from "jose";
@@ -558,7 +558,7 @@ export async function POST(request: NextRequest) {
       });
 
       if (walletResolution.status === "resolved") {
-        const treasuryResult = await queueInitialAllocationForUser({
+        const treasuryResult = await queueInitialFundingForUser({
           userId: user.id,
           normalizedEmail: verifiedEmail,
           issuer: metadata.issuer,

@@ -7,27 +7,26 @@ const ERC20_ABI = [
   "function decimals() view returns (uint8)",
 ] as const;
 
-export type TreasuryConfig = {
+export type TreasuryReadConfig = {
   chainId: number;
   rpcUrl: string;
   tokenAddress: `0x${string}`;
   tokenDecimals: number;
+};
+
+export type TreasuryConfig = TreasuryReadConfig & {
   initialAllocationBaseUnits: string;
   distributionPaused: boolean;
 };
 
-export function getTreasuryConfig(): TreasuryConfig {
+export function getTreasuryReadConfig(): TreasuryReadConfig {
   const rpcUrl = process.env.TREASURY_RPC_URL;
-  const privateKey = process.env.TREASURY_PRIVATE_KEY;
   const tokenAddress = process.env.GOVERNANCE_TOKEN_ADDRESS;
   const chainId = Number(process.env.TREASURY_CHAIN_ID ?? 11155111);
   const tokenDecimals = Number(process.env.GOVERNANCE_TOKEN_DECIMALS ?? 18);
-  const rawAllocation = process.env.TREASURY_INITIAL_ALLOCATION ?? "1000";
-  const distributionPaused =
-    String(process.env.TREASURY_DISTRIBUTION_PAUSED ?? "false") === "true";
 
-  if (!rpcUrl || !privateKey || !tokenAddress) {
-    throw new Error("Treasury configuration is incomplete.");
+  if (!rpcUrl || !tokenAddress) {
+    throw new Error("Treasury read configuration is incomplete.");
   }
 
   return {
@@ -35,16 +34,32 @@ export function getTreasuryConfig(): TreasuryConfig {
     rpcUrl,
     tokenAddress: tokenAddress as `0x${string}`,
     tokenDecimals,
+  };
+}
+
+export function getTreasuryConfig(): TreasuryConfig {
+  const readConfig = getTreasuryReadConfig();
+  const privateKey = process.env.TREASURY_PRIVATE_KEY;
+  const rawAllocation = process.env.TREASURY_INITIAL_ALLOCATION ?? "1000";
+  const distributionPaused =
+    String(process.env.TREASURY_DISTRIBUTION_PAUSED ?? "false") === "true";
+
+  if (!privateKey) {
+    throw new Error("Treasury configuration is incomplete.");
+  }
+
+  return {
+    ...readConfig,
     initialAllocationBaseUnits: parseUnits(
       rawAllocation,
-      tokenDecimals,
+      readConfig.tokenDecimals,
     ).toString(),
     distributionPaused,
   };
 }
 
 export function createTreasuryProvider() {
-  const config = getTreasuryConfig();
+  const config = getTreasuryReadConfig();
   return new JsonRpcProvider(config.rpcUrl, config.chainId);
 }
 
@@ -60,14 +75,14 @@ export function createTreasurySigner() {
 
 export function createGovernanceTokenWriteContract() {
   const signer = createTreasurySigner();
-  const { tokenAddress } = getTreasuryConfig();
+  const { tokenAddress } = getTreasuryReadConfig();
 
   return new Contract(tokenAddress, ERC20_ABI, signer);
 }
 
 export function createGovernanceTokenReadContract() {
   const provider = createTreasuryProvider();
-  const { tokenAddress } = getTreasuryConfig();
+  const { tokenAddress } = getTreasuryReadConfig();
 
   return new Contract(tokenAddress, ERC20_ABI, provider);
 }
