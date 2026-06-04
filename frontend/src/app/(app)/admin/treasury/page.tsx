@@ -108,24 +108,18 @@ export default async function AdminTreasuryPage() {
 
   return (
     <main className="page-shell">
-      <div className="page-shell__header">
-        <div className="page-shell__heading">
+      <header className="page-shell__header">
+        <div className="page-shell__heading heading-admin-dashboard">
           <h1>Treasury operations</h1>
-          <p>
-            Review queued onboarding transfers, copy exact transfer details,
-            record submitted transaction hashes, and reconcile both governance
-            token allocations and Sepolia gas funding without changing the
-            current manual signing workflow.
-          </p>
         </div>
-      </div>
+      </header>
 
-      <div className="page-shell__content">
+      <section className="page-shell__content" aria-label="Treasury queue">
         <TreasuryQueue
           initialPendingItems={pendingItems}
           initialSubmittedItems={submittedItems}
         />
-      </div>
+      </section>
     </main>
   );
 }

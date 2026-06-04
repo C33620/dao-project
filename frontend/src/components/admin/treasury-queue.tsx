@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 type TreasuryQueueItem = {
   id: string;
@@ -98,6 +98,45 @@ function getAssetLabel(item: TreasuryQueueItem) {
   return item.tokenAddress ? "Token" : "Sepolia ETH";
 }
 
+function CopyIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      fill="currentColor"
+    >
+      <path d="M10 1.5a2.5 2.5 0 0 1 2.5 2.5v6A2.5 2.5 0 0 1 10 12.5H5A2.5 2.5 0 0 1 2.5 10V4A2.5 2.5 0 0 1 5 1.5h5Zm0 1H5A1.5 1.5 0 0 0 3.5 4v6A1.5 1.5 0 0 0 5 11.5h5A1.5 1.5 0 0 0 11.5 10V4A1.5 1.5 0 0 0 10 2.5Zm3 3a.5.5 0 0 1 .5.5V11A3.5 3.5 0 0 1 10 14.5H5a.5.5 0 0 1 0-1h5A2.5 2.5 0 0 0 12.5 11V6a.5.5 0 0 1 .5-.5Z" />
+    </svg>
+  );
+}
+
+function ValueWithCopy({
+  value,
+  label,
+  onCopy,
+}: {
+  value: string;
+  label: string;
+  onCopy: (value: string, label: string) => void;
+}) {
+  return (
+    <div className="treasury-copy-field">
+      <span className="treasury-copy-field__value">{value}</span>
+      <button
+        type="button"
+        className="treasury-copy-button"
+        onClick={() => void onCopy(value, label)}
+        aria-label={`Copy ${label}`}
+        title={`Copy ${label}`}
+      >
+        <CopyIcon />
+      </button>
+    </div>
+  );
+}
+
 export function TreasuryQueue({
   initialPendingItems,
   initialSubmittedItems,
@@ -111,11 +150,6 @@ export function TreasuryQueue({
     type: null,
     message: "",
   });
-
-  const totalCount = useMemo(
-    () => pendingItems.length + submittedItems.length,
-    [pendingItems.length, submittedItems.length],
-  );
 
   async function handleCopy(value: string, label: string) {
     try {
@@ -241,6 +275,21 @@ export function TreasuryQueue({
 
   return (
     <div className="treasury-queue">
+      {feedback.type ? (
+        <div
+          className={
+            feedback.type === "success"
+              ? "status-badge status-badge--success treasury-page-feedback"
+              : "status-badge status-badge--danger treasury-page-feedback"
+          }
+          role="status"
+          aria-live="polite"
+        >
+          <span className="status-badge__dot" />
+          <span className="status-badge__label">{feedback.message}</span>
+        </div>
+      ) : null}
+
       <section className="section-card">
         <div className="section-card__header">
           <div>
@@ -302,7 +351,13 @@ export function TreasuryQueue({
                     <dl className="treasury-row__meta">
                       <div>
                         <dt>Recipient</dt>
-                        <dd>{item.walletAddress}</dd>
+                        <dd>
+                          <ValueWithCopy
+                            value={item.walletAddress}
+                            label="recipient address"
+                            onCopy={handleCopy}
+                          />
+                        </dd>
                       </div>
                       <div>
                         <dt>Amount</dt>
@@ -319,42 +374,18 @@ export function TreasuryQueue({
                       {item.tokenAddress ? (
                         <div className="treasury-row__meta--full">
                           <dt>Token address</dt>
-                          <dd>{item.tokenAddress}</dd>
+                          <dd>
+                            <ValueWithCopy
+                              value={item.tokenAddress}
+                              label="token address"
+                              onCopy={handleCopy}
+                            />
+                          </dd>
                         </div>
                       ) : null}
                     </dl>
 
                     <div className="button-row treasury-row__utility-actions">
-                      <button
-                        type="button"
-                        className="button button--secondary"
-                        onClick={() =>
-                          handleCopy(item.walletAddress, "Recipient address")
-                        }
-                      >
-                        Copy recipient
-                      </button>
-
-                      <button
-                        type="button"
-                        className="button button--secondary"
-                        onClick={() => handleCopy(formattedAmount, "Amount")}
-                      >
-                        Copy amount
-                      </button>
-
-                      {item.tokenAddress ? (
-                        <button
-                          type="button"
-                          className="button button--secondary"
-                          onClick={() =>
-                            handleCopy(item.tokenAddress!, "Token address")
-                          }
-                        >
-                          Copy token
-                        </button>
-                      ) : null}
-
                       <a
                         className="button button--secondary"
                         href={getSepoliaAddressUrl(item.walletAddress)}
@@ -510,7 +541,13 @@ export function TreasuryQueue({
                     <dl className="treasury-row__meta">
                       <div>
                         <dt>Recipient</dt>
-                        <dd>{item.walletAddress}</dd>
+                        <dd>
+                          <ValueWithCopy
+                            value={item.walletAddress}
+                            label="recipient address"
+                            onCopy={handleCopy}
+                          />
+                        </dd>
                       </div>
                       <div>
                         <dt>Amount</dt>
@@ -528,48 +565,30 @@ export function TreasuryQueue({
                         <dt>Transaction hash</dt>
                         <dd>{item.txHash || "—"}</dd>
                       </div>
+                      {item.tokenAddress ? (
+                        <div className="treasury-row__meta--full">
+                          <dt>Token address</dt>
+                          <dd>
+                            <ValueWithCopy
+                              value={item.tokenAddress}
+                              label="token address"
+                              onCopy={handleCopy}
+                            />
+                          </dd>
+                        </div>
+                      ) : null}
                     </dl>
 
                     <div className="button-row treasury-row__utility-actions">
-                      <button
-                        type="button"
-                        className="button button--secondary"
-                        onClick={() =>
-                          handleCopy(item.walletAddress, "Recipient address")
-                        }
-                      >
-                        Copy recipient
-                      </button>
-
-                      <button
-                        type="button"
-                        className="button button--secondary"
-                        onClick={() => handleCopy(formattedAmount, "Amount")}
-                      >
-                        Copy amount
-                      </button>
-
                       {item.txHash ? (
-                        <>
-                          <button
-                            type="button"
-                            className="button button--secondary"
-                            onClick={() =>
-                              handleCopy(item.txHash!, "Transaction hash")
-                            }
-                          >
-                            Copy tx hash
-                          </button>
-
-                          <a
-                            className="button button--secondary"
-                            href={getSepoliaTxUrl(item.txHash)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            Open transaction
-                          </a>
-                        </>
+                        <a
+                          className="button button--secondary"
+                          href={getSepoliaTxUrl(item.txHash)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Open transaction
+                        </a>
                       ) : null}
                     </div>
 
@@ -589,12 +608,6 @@ export function TreasuryQueue({
                           <dt>Chain</dt>
                           <dd>{item.chainId}</dd>
                         </div>
-                        {item.tokenAddress ? (
-                          <div className="treasury-row__meta--full">
-                            <dt>Token address</dt>
-                            <dd>{item.tokenAddress}</dd>
-                          </div>
-                        ) : null}
                       </dl>
                     </details>
                   </article>
@@ -604,28 +617,6 @@ export function TreasuryQueue({
           )}
         </div>
       </section>
-
-      {feedback.type ? (
-        <div
-          className={
-            feedback.type === "success"
-              ? "status-badge status-badge--success treasury-queue__feedback"
-              : "status-badge status-badge--danger treasury-queue__feedback"
-          }
-        >
-          <span className="status-badge__dot" />
-          <span className="status-badge__label">{feedback.message}</span>
-        </div>
-      ) : null}
-
-      <div className="treasury-queue__summary">
-        <span className="status-badge status-badge--default">
-          <span className="status-badge__dot" />
-          <span className="status-badge__label">
-            {totalCount} active item(s)
-          </span>
-        </span>
-      </div>
     </div>
   );
 }

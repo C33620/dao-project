@@ -11,6 +11,7 @@ import {
   getRateLimitKey,
   type RateLimitExceededError,
 } from "@/lib/rate-limit";
+import { getUserDocumentByEmail } from "@/lib/repositories/users";
 import { queueInitialFundingForUser } from "@/lib/treasury/distribute";
 import { Magic } from "@magic-sdk/admin";
 import { InviteCodeStatus, Prisma } from "@prisma/client";
@@ -209,16 +210,132 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const existingUser = await getUserDocumentByEmail(normalizedEmail);
+
+    if (!body.isNewUser && !existingUser) {
+      logDebug("PRECHECK_FAILED_SIGNIN_EMAIL_NOT_FOUND", {
+        email: normalizedEmail,
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "This email doesn’t exist. Please create an account.",
+        },
+        { status: 404 },
+      );
+    }
+
+    if (body.isNewUser && existingUser) {
+      logDebug("PRECHECK_FAILED_SIGNUP_EMAIL_ALREADY_EXISTS", {
+        email: normalizedEmail,
+        userId: existingUser.id,
+      });
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "An account with this email already exists. Sign in instead.",
+        },
+        { status: 409 },
+      );
+    }
+
     const totalUsers = await db.user.count();
     logDebug("PRECHECK_TOTAL_USERS", { totalUsers });
 
+    const requiresInviteCode = totalUsers > 0;
+
+    if (body.isNewUser && requiresInviteCode) {
+      const submittedInviteCode = normalizeInviteCode(body.inviteCode ?? "");
+
+      if (!submittedInviteCode) {
+        logDebug("PRECHECK_FAILED_MISSING_ACTIVATION_CODE");
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Activation code is required.",
+            requiresInviteCode: true,
+          },
+          { status: 400 },
+        );
+      }
+
+      const invite = await db.inviteCode.findUnique({
+        where: { code: submittedInviteCode },
+        select: {
+          id: true,
+          status: true,
+          expiresAt: true,
+        },
+      });
+
+      logDebug("PRECHECK_INVITE_LOOKUP_RESULT", {
+        code: submittedInviteCode,
+        found: Boolean(invite),
+        inviteId: invite?.id ?? null,
+        status: invite?.status ?? null,
+      });
+
+      if (!invite) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Activation code is invalid.",
+            requiresInviteCode: true,
+          },
+          { status: 400 },
+        );
+      }
+
+      const effectiveStatus = resolveInviteAvailability(
+        invite.status,
+        invite.expiresAt,
+      );
+
+      logDebug("PRECHECK_INVITE_STATUS_RESOLVED", {
+        inviteId: invite.id,
+        storedStatus: invite.status,
+        effectiveStatus,
+        expiresAt: invite.expiresAt,
+      });
+
+      if (
+        effectiveStatus === InviteCodeStatus.EXPIRED &&
+        invite.status === InviteCodeStatus.AVAILABLE
+      ) {
+        await db.inviteCode.update({
+          where: { id: invite.id },
+          data: { status: InviteCodeStatus.EXPIRED },
+        });
+
+        logDebug("PRECHECK_INVITE_MARKED_EXPIRED", { inviteId: invite.id });
+      }
+
+      if (effectiveStatus !== InviteCodeStatus.AVAILABLE) {
+        logDebug("PRECHECK_FAILED_INVITE_NOT_AVAILABLE", {
+          inviteId: invite.id,
+          effectiveStatus,
+        });
+
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Activation code is no longer available.",
+            requiresInviteCode: true,
+          },
+          { status: 409 },
+        );
+      }
+    }
+
     logDebug("PRECHECK_SUCCESS", {
-      requiresInviteCode: totalUsers > 0,
+      requiresInviteCode,
     });
 
     return NextResponse.json({
       ok: true,
-      requiresInviteCode: totalUsers > 0,
+      requiresInviteCode,
     });
   }
 

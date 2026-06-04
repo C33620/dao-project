@@ -13,13 +13,66 @@ import { NextResponse } from "next/server";
 import {
   createPublicClient,
   createWalletClient,
+  decodeErrorResult,
   encodeFunctionData,
   http,
+  keccak256,
+  toHex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 
 export const runtime = "nodejs";
+
+const errorSignatures = [
+  "ECDSAInvalidSignature()",
+  "EthTransferFailed()",
+  "InsufficientEthBalance()",
+  "InsufficientTokenBalance()",
+  "InvalidRelayer()",
+  "InvalidSignature()",
+  "SignatureExpired()",
+  "ZeroAddress()",
+];
+
+for (const error of errorSignatures) {
+  const selector = keccak256(toHex(error)).slice(0, 10);
+  console.log("error selector", error, selector);
+}
+
+type UnknownRecord = Record<string, unknown>;
+
+type WalkableError = {
+  walk?: () => unknown;
+};
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === "object" && value !== null;
+}
+
+function findHexString(
+  value: unknown,
+  seen = new Set<unknown>(),
+): `0x${string}` | undefined {
+  if (typeof value === "string" && value.startsWith("0x")) {
+    return value as `0x${string}`;
+  }
+
+  if (!isRecord(value) || seen.has(value)) {
+    return undefined;
+  }
+
+  seen.add(value);
+
+  for (const nested of Object.values(value)) {
+    const found = findHexString(nested, seen);
+    if (found) {
+      return found;
+    }
+  }
+
+  return undefined;
+}
 
 function clearSessionCookie(response: NextResponse) {
   response.cookies.set({
@@ -142,15 +195,38 @@ export async function POST(request: Request) {
       ],
     });
 
+    const authorizationYParity =
+      attempt.authorizationV === 27
+        ? 0
+        : attempt.authorizationV === 28
+        ? 1
+        : attempt.authorizationV;
+
     console.log("close execute payload", {
       walletAddress: attempt.walletAddress,
       delegateContractAddress: attempt.delegateContractAddress,
+      authorizationContractAddress: attempt.authorizationContractAddress,
       relayer: attempt.closeIntentRelayer,
       nonce: String(attempt.closeIntentNonce),
       deadlineSeconds: closeIntentDeadlineSeconds.toString(),
       authorizationChainId: attempt.authorizationChainId,
       authorizationNonce: String(attempt.authorizationNonce),
+      authorizationV: attempt.authorizationV,
+      authorizationYParity,
+      authorizationR: attempt.authorizationR,
+      authorizationS: attempt.authorizationS,
     });
+
+    try {
+      const preflight = await publicClient.call({
+        account: account.address,
+        to: attempt.walletAddress as `0x${string}`,
+        data,
+      });
+      console.log("preflight call result", preflight);
+    } catch (preflightErr) {
+      console.error("preflight call failed", preflightErr);
+    }
 
     const txHash = await walletClient.sendTransaction({
       account,
@@ -158,10 +234,10 @@ export async function POST(request: Request) {
       data,
       authorizationList: [
         {
-          address: attempt.delegateContractAddress as `0x${string}`,
+          address: attempt.authorizationContractAddress as `0x${string}`,
           chainId: attempt.authorizationChainId,
           nonce: Number(attempt.authorizationNonce),
-          yParity: attempt.authorizationV,
+          yParity: authorizationYParity,
           r: attempt.authorizationR as `0x${string}`,
           s: attempt.authorizationS as `0x${string}`,
         },
@@ -206,10 +282,57 @@ export async function POST(request: Request) {
         where: { id: attempt.userId },
       });
     });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
+  } catch (err: unknown) {
+    let message = err instanceof Error ? err.message : "Unknown error";
 
     console.error("close execute failed", err);
+
+    if (isRecord(err) && "walk" in err) {
+      const walkable = err as WalkableError;
+      try {
+        const walked = walkable.walk?.();
+        console.error("walked error", walked);
+      } catch (walkErr) {
+        console.error("walk failed", walkErr);
+      }
+    }
+
+    console.error("error cause", isRecord(err) ? err["cause"] : undefined);
+    console.error(
+      "error cause cause",
+      isRecord(err) && isRecord(err["cause"])
+        ? err["cause"]["cause"]
+        : undefined,
+    );
+
+    const revertData = findHexString(err);
+    console.error("revertData", revertData);
+
+    if (revertData) {
+      try {
+        const decoded = decodeErrorResult({
+          abi: closeAccountDelegateAbi,
+          data: revertData,
+        });
+
+        console.error("decoded closeAccount revert", decoded);
+
+        message =
+          decoded.args && decoded.args.length > 0
+            ? `${decoded.errorName}(${decoded.args.map(String).join(", ")})`
+            : decoded.errorName;
+      } catch (decodeErr) {
+        const decodeMessage =
+          decodeErr instanceof Error
+            ? decodeErr.message
+            : "Unknown decode error";
+        console.error(
+          "failed to decode revert data",
+          decodeMessage,
+          revertData,
+        );
+      }
+    }
 
     await markCloseAttemptFailed({
       attemptKey: attempt.attemptKey,

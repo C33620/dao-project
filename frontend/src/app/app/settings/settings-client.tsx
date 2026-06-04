@@ -68,10 +68,6 @@ type CloseIntentPayload = {
   signature: string;
 };
 
-function truncateAddress(address: string) {
-  return `${address.slice(0, 6)}...${address.slice(-4)}`;
-}
-
 function getMagicEip1193Provider() {
   const magic = getMagicClient();
   return magic.rpcProvider as unknown as Eip1193Provider;
@@ -157,25 +153,24 @@ async function signCloseIntent(input: {
     deadline: input.deadlineSeconds.toString(),
   };
 
+  const typedData = {
+    domain,
+    types: {
+      EIP712Domain: [
+        { name: "name", type: "string" },
+        { name: "version", type: "string" },
+        { name: "chainId", type: "uint256" },
+        { name: "verifyingContract", type: "address" },
+      ],
+      ...types,
+    },
+    primaryType: "CloseAccount" as const,
+    message,
+  };
+
   const signature = (await input.provider.request?.({
     method: "eth_signTypedData_v4",
-    params: [
-      input.walletAddress,
-      JSON.stringify({
-        domain,
-        types: {
-          EIP712Domain: [
-            { name: "name", type: "string" },
-            { name: "version", type: "string" },
-            { name: "chainId", type: "uint256" },
-            { name: "verifyingContract", type: "address" },
-          ],
-          ...types,
-        },
-        primaryType: "CloseAccount",
-        message,
-      }),
-    ],
+    params: [input.walletAddress, JSON.stringify(typedData)],
   })) as string | undefined;
 
   if (!signature || typeof signature !== "string") {
@@ -213,13 +208,8 @@ export default function SettingsClient({ user }: SettingsClientProps) {
   const [delegateContractAddress, setDelegateContractAddress] = useState<
     string | null
   >(null);
-  const [recipientAddress, setRecipientAddress] = useState<string | null>(null);
   const [relayerAddress, setRelayerAddress] = useState<string | null>(null);
   const [closeDeadline, setCloseDeadline] = useState<string | null>(null);
-  const [authorizationPreview, setAuthorizationPreview] =
-    useState<AuthorizationPayload | null>(null);
-  const [closeIntentPreview, setCloseIntentPreview] =
-    useState<CloseIntentPayload | null>(null);
 
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -313,11 +303,8 @@ export default function SettingsClient({ user }: SettingsClientProps) {
     setAttemptExpiresAt(null);
     setCloseChainId(null);
     setDelegateContractAddress(null);
-    setRecipientAddress(null);
     setRelayerAddress(null);
     setCloseDeadline(null);
-    setAuthorizationPreview(null);
-    setCloseIntentPreview(null);
     setCloseWalletAddress(user.walletAddress ?? null);
   }
 
@@ -380,7 +367,6 @@ export default function SettingsClient({ user }: SettingsClientProps) {
       setCloseWalletAddress(data.walletAddress ?? closeWalletAddress);
       setCloseChainId(data.chainId ?? null);
       setDelegateContractAddress(data.delegateContractAddress);
-      setRecipientAddress(data.recipientAddress ?? null);
       setRelayerAddress(data.relayerAddress);
       setCloseDeadline(data.closeDeadline);
 
@@ -425,18 +411,12 @@ export default function SettingsClient({ user }: SettingsClientProps) {
         await provider.request?.({ method: "eth_accounts" }),
       );
 
-      console.log(
-        "eth_chainId",
-        await provider.request?.({ method: "eth_chainId" }),
-      );
-
       const rawAuthorization = await magic.wallet.sign7702Authorization({
         contractAddress: delegateContractAddress,
         chainId: closeChainId,
       });
 
       const authorization = normalizeAuthorization(rawAuthorization);
-      setAuthorizationPreview(authorization);
 
       if (
         authorization.chainId == null ||
@@ -449,31 +429,30 @@ export default function SettingsClient({ user }: SettingsClientProps) {
         throw new Error("Magic returned an incomplete authorization payload.");
       }
 
-      setDeleteMessage("Reading close nonce from delegate contract...");
+      setDeleteMessage("Reading close nonce from delegated account...");
 
       const ethersProvider = new BrowserProvider(provider);
+      const delegatedAccountAddress = getAddress(closeWalletAddress);
+      const normalizedDelegateContractAddress = getAddress(
+        delegateContractAddress,
+      );
 
       console.log("network", await ethersProvider.getNetwork());
-      console.log("delegateContractAddress", delegateContractAddress);
-      // const signer = await ethersProvider.getSigner();
+      console.log("delegatedAccountAddress", delegatedAccountAddress);
+      console.log("delegateContractAddress", normalizedDelegateContractAddress);
 
-      const delegateRead = new Contract(
-        delegateContractAddress,
+      const delegatedRead = new Contract(
+        delegatedAccountAddress,
         closeAccountDelegateAbi,
         ethersProvider,
       );
 
-      // const delegate = new Contract(
-      //   delegateContractAddress,
-      //   closeAccountDelegateAbi,
-      //   signer,
-      // );
-
-      const nonce = (await delegateRead.closeNonce()) as bigint;
+      const nonce = (await delegatedRead.closeNonce()) as bigint;
 
       const deadlineSeconds = BigInt(
         Math.floor(new Date(closeDeadline).getTime() / 1000),
       );
+
       if (deadlineSeconds <= BigInt(Math.floor(Date.now() / 1000))) {
         throw new Error("This close attempt expired. Please start again.");
       }
@@ -482,9 +461,9 @@ export default function SettingsClient({ user }: SettingsClientProps) {
 
       const closeIntentSignatureResult = await signCloseIntent({
         provider,
-        walletAddress: getAddress(closeWalletAddress),
+        walletAddress: delegatedAccountAddress,
         chainId: closeChainId,
-        delegateContractAddress: getAddress(delegateContractAddress),
+        delegateContractAddress: normalizedDelegateContractAddress,
         relayerAddress: getAddress(relayerAddress),
         nonce,
         deadlineSeconds,
@@ -497,7 +476,9 @@ export default function SettingsClient({ user }: SettingsClientProps) {
         signature: closeIntentSignatureResult.signature,
       };
 
-      setCloseIntentPreview(closeIntent);
+      console.log("close intent domain", closeIntentSignatureResult.domain);
+      console.log("close intent message", closeIntentSignatureResult.message);
+      console.log("close intent signature", closeIntent.signature);
 
       setDeleteMessage("Storing signed authorization...");
       setCloseStep("storing_authorization");
@@ -647,9 +628,9 @@ export default function SettingsClient({ user }: SettingsClientProps) {
                     id="delete-account-dialog-description"
                     style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}
                   >
-                    This guided flow prepares account closure, asks your wallet
-                    to sign a 7702 authorization, signs a close intent, stores
-                    both on the backend, and then runs the close flow for you.
+                    You&apos;ll need to complete a few steps to close your
+                    account. This guided process helps verify your request and
+                    ensures your account is closed securely.
                   </p>
                 </div>
 
@@ -671,11 +652,11 @@ export default function SettingsClient({ user }: SettingsClientProps) {
                     {closeStep === "preparing" &&
                       "Preparing the account closure request."}
                     {closeStep === "ready_to_sign" &&
-                      "Your account is ready. Continue to sign the wallet authorization."}
+                      "Your account is ready. Continue to authorize account closure."}
                     {closeStep === "signing" &&
-                      "Waiting for wallet signatures."}
+                      "Waiting for wallet authorization and signature."}
                     {closeStep === "storing_authorization" &&
-                      "Saving signed authorization to the backend."}
+                      "Saving account deletion request."}
                     {closeStep === "executing" && "Executing the close flow."}
                     {closeStep === "done" &&
                       "Account closure completed. Redirecting..."}
@@ -684,84 +665,6 @@ export default function SettingsClient({ user }: SettingsClientProps) {
                     {closeStep === "expired" &&
                       "This close attempt expired. Please start again."}
                   </p>
-
-                  {closeWalletAddress ? (
-                    <p style={{ margin: 0, fontSize: 13 }}>
-                      Wallet: {truncateAddress(closeWalletAddress)}
-                    </p>
-                  ) : null}
-
-                  {delegateContractAddress ? (
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: 13,
-                        overflowWrap: "anywhere",
-                      }}
-                    >
-                      Delegate contract: {delegateContractAddress}
-                    </p>
-                  ) : null}
-
-                  {recipientAddress ? (
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: 13,
-                        overflowWrap: "anywhere",
-                      }}
-                    >
-                      Treasury recipient: {recipientAddress}
-                    </p>
-                  ) : null}
-
-                  {relayerAddress ? (
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: 13,
-                        overflowWrap: "anywhere",
-                      }}
-                    >
-                      Relayer: {relayerAddress}
-                    </p>
-                  ) : null}
-
-                  {authorizationPreview ? (
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <p style={{ margin: 0, fontSize: 13 }}>
-                        Authorization nonce:{" "}
-                        {String(authorizationPreview.nonce)}
-                      </p>
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: 13,
-                          overflowWrap: "anywhere",
-                        }}
-                      >
-                        Authorization contract:{" "}
-                        {String(authorizationPreview.contractAddress)}
-                      </p>
-                    </div>
-                  ) : null}
-
-                  {closeIntentPreview ? (
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <p style={{ margin: 0, fontSize: 13 }}>
-                        Close intent nonce: {closeIntentPreview.nonce}
-                      </p>
-                      <p
-                        style={{
-                          margin: 0,
-                          fontSize: 13,
-                          overflowWrap: "anywhere",
-                        }}
-                      >
-                        Close intent relayer: {closeIntentPreview.relayer}
-                      </p>
-                    </div>
-                  ) : null}
 
                   {attemptExpiresAt ? (
                     <p
@@ -830,7 +733,7 @@ export default function SettingsClient({ user }: SettingsClientProps) {
                     }}
                   >
                     {closeStep === "idle" && "Continue"}
-                    {closeStep === "ready_to_sign" && "Authorize and close"}
+                    {closeStep === "ready_to_sign" && "Continue and close"}
                     {closeStep === "error" && "Retry"}
                     {closeStep === "expired" && "Start again"}
                   </button>
@@ -966,9 +869,9 @@ export default function SettingsClient({ user }: SettingsClientProps) {
             <div style={{ display: "grid", gap: 8, marginBottom: 20 }}>
               <h2 style={{ fontSize: 22, lineHeight: 1.2 }}>Danger zone</h2>
               <p style={{ color: "rgb(153, 27, 27)" }}>
-                Deleting your account is permanent. This flow uses a wallet
-                authorization plus a signed close intent instead of manual token
-                and ETH transfers.
+                Deleting your account is permanent. Once your account is
+                deleted, all associated data will be permanently removed and
+                cannot be recovered.
               </p>
             </div>
 
