@@ -1,5 +1,6 @@
 import { SectionCard } from "@/components/ui/section-card";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { getProposalCategoryLabel } from "@/lib/governance/create-proposal";
 import { getProposalById, getProposalTimeline } from "@/lib/services/proposals";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -24,7 +25,9 @@ export default async function ProposalDetailPage({
     <div className="proposal-detail">
       <section className="proposal-detail__hero">
         <div className="proposal-detail__hero-content">
-          <p className="proposal-detail__eyebrow">{proposal.category}</p>
+          <p className="proposal-detail__eyebrow">
+            {getProposalCategoryLabel(proposal.category)}
+          </p>
           <h1>{proposal.title}</h1>
           <p className="proposal-detail__summary">{proposal.excerpt}</p>
         </div>
@@ -53,11 +56,11 @@ export default async function ProposalDetailPage({
             </div>
             <div>
               <dt>Voting starts</dt>
-              <dd>{proposal.votingStartsAt}</dd>
+              <dd>{proposal.votingStartsAt ?? "Waiting"}</dd>
             </div>
             <div>
               <dt>Voting ends</dt>
-              <dd>{proposal.votingEndsAt}</dd>
+              <dd>{proposal.votingEndsAt ?? "Waiting"}</dd>
             </div>
             <div>
               <dt>Execution</dt>
@@ -73,7 +76,7 @@ export default async function ProposalDetailPage({
           <dl className="key-value-grid">
             <div>
               <dt>Category</dt>
-              <dd>{proposal.category}</dd>
+              <dd>{getProposalCategoryLabel(proposal.category)}</dd>
             </div>
             <div>
               <dt>Proposer</dt>
@@ -97,7 +100,9 @@ export default async function ProposalDetailPage({
           description="A concise explanation of what this proposal is asking for."
         >
           <div className="prose-block">
-            <p>{proposal.excerpt}</p>
+            {proposal.description.map((paragraph) => (
+              <p key={paragraph}>{paragraph}</p>
+            ))}
           </div>
         </SectionCard>
 

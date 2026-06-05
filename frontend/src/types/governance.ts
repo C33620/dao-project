@@ -21,12 +21,10 @@ export type ProposalTimelineStage =
 export type VoteSupport = "for" | "against" | "abstain";
 
 export type ProposalCategory =
-  | "Protocol"
-  | "Treasury"
-  | "Governance"
-  | "Community"
-  | "Risk"
-  | "Operations";
+  | "COFFEE_MEETUP"
+  | "HACK_DAY"
+  | "WORKSHOP"
+  | "OTHER";
 
 export type StatusTone =
   | "default"
@@ -93,6 +91,7 @@ export type GovernanceActivityItem = {
   description: string;
   occurredAt: string;
   relatedProposalId?: string;
+  relatedProposalCategory?: ProposalCategory;
   tone: StatusTone;
 };
 

@@ -1,8 +1,26 @@
 import myGovernorAbi from "@/abi/MyGovernor.json";
 import { MY_GOVERNOR_ADDRESS } from "@/lib/web3/contracts";
+import type { ProposalCategory } from "@/types/governance";
 import { encodeFunctionData, keccak256, stringToHex } from "viem";
 
 export type ProposalOrigin = "dashboard" | "proposals";
+
+export const PROPOSAL_CATEGORY_OPTIONS: Array<{
+  value: ProposalCategory;
+  label: string;
+}> = [
+  { value: "COFFEE_MEETUP", label: "Coffee Meetup" },
+  { value: "HACK_DAY", label: "Hack Day" },
+  { value: "WORKSHOP", label: "Workshop" },
+  { value: "OTHER", label: "Other" },
+];
+
+export function getProposalCategoryLabel(category: ProposalCategory) {
+  const option = PROPOSAL_CATEGORY_OPTIONS.find(
+    (item) => item.value === category,
+  );
+  return option?.label ?? "Other";
+}
 
 export function buildProposalTitle(input: string) {
   const trimmed = input.trim();

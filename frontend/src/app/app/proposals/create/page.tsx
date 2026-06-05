@@ -5,7 +5,7 @@ import CreateProposalClient from "./create-proposal-client";
 
 type CreateProposalPageProps = {
   searchParams?: Promise<{
-    origin?: string;
+    from?: string;
   }>;
 };
 
@@ -57,9 +57,10 @@ export default async function CreateProposalPage({
   searchParams,
 }: CreateProposalPageProps) {
   const params = await searchParams;
+
   const origin =
-    params?.origin === "dashboard" || params?.origin === "proposals"
-      ? params.origin
+    params?.from === "dashboard" || params?.from === "proposals"
+      ? params.from
       : "proposals";
 
   const accountReadiness = await getAccountReadiness();

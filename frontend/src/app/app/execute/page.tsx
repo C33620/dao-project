@@ -1,6 +1,7 @@
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { getProposalCategoryLabel } from "@/lib/governance/create-proposal";
 import { getProposals } from "@/lib/services/proposals";
 import Link from "next/link";
 
@@ -24,7 +25,7 @@ export default async function ExecutePage() {
                   <div className="execution-item__topline">
                     <div>
                       <p className="execution-item__category">
-                        {proposal.category}
+                        {getProposalCategoryLabel(proposal.category)}
                       </p>
                       <h3 className="execution-item__title">
                         {proposal.title}

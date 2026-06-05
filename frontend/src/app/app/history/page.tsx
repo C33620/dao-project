@@ -1,5 +1,6 @@
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
+import { getProposalCategoryLabel } from "@/lib/governance/create-proposal";
 import { getRecentGovernanceActivity } from "@/lib/services/proposals";
 
 export default async function HistoryPage() {
@@ -26,6 +27,12 @@ export default async function HistoryPage() {
                       <span>{item.occurredAt}</span>
                     </div>
                     <p>{item.description}</p>
+                    {item.relatedProposalCategory ? (
+                      <p>
+                        Category:{" "}
+                        {getProposalCategoryLabel(item.relatedProposalCategory)}
+                      </p>
+                    ) : null}
                   </div>
                 </article>
               ))

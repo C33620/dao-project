@@ -1,4 +1,5 @@
 import { StatusBadge } from "@/components/ui/status-badge";
+import { getProposalCategoryLabel } from "@/lib/governance/create-proposal";
 import type { ProposalSummary } from "@/types/governance";
 import Link from "next/link";
 
@@ -11,7 +12,9 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
     <article className="proposal-card">
       <div className="proposal-card__top">
         <div className="proposal-card__headline">
-          <p className="proposal-card__category">{proposal.category}</p>
+          <p className="proposal-card__category">
+            {getProposalCategoryLabel(proposal.category)}
+          </p>
           <h2 className="proposal-card__title">
             <Link href={`/app/proposals/${proposal.id}`}>{proposal.title}</Link>
           </h2>
@@ -32,7 +35,7 @@ export function ProposalCard({ proposal }: ProposalCardProps) {
         </div>
         <div>
           <dt>Voting ends</dt>
-          <dd>{proposal.votingEndsAt}</dd>
+          <dd>{proposal.votingEndsAt ?? "Waiting"}</dd>
         </div>
       </dl>
 

@@ -2,29 +2,32 @@
 
 import governanceTokenAbi from "@/abi/GovernanceToken.json";
 import myGovernorAbi from "@/abi/MyGovernor.json";
-import proposalRegistryAbi from "@/abi/ProposalRegistry.json";
 import { getMagicClient } from "@/lib/auth/magic-client";
 import {
+  buildDescriptionHash,
   buildProposalAction,
   buildProposalDescription,
   buildProposalSummary,
   buildProposalTitle,
+  getProposalCategoryLabel,
   getProposalReturnHref,
+  PROPOSAL_CATEGORY_OPTIONS,
   type ProposalOrigin,
 } from "@/lib/governance/create-proposal";
 import {
   GOVERNANCE_TOKEN_ADDRESS,
   MY_GOVERNOR_ADDRESS,
-  PROPOSAL_REGISTRY_ADDRESS,
 } from "@/lib/web3/contracts";
-import { BrowserProvider, Contract } from "ethers";
-import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { ProposalCategory } from "@/types/governance";
 import {
-  useReadContract,
-  useWaitForTransactionReceipt,
-  useWriteContract,
-} from "wagmi";
+  BrowserProvider,
+  Contract,
+  Interface,
+  type TransactionReceipt,
+} from "ethers";
+import Link from "next/link";
+import { useMemo, useRef, useState } from "react";
+import { useReadContract } from "wagmi";
 
 type CreateProposalClientProps = {
   origin: ProposalOrigin;
@@ -40,10 +43,17 @@ type SubmissionStage =
   | "review"
   | "wallet-governor"
   | "creating-proposal"
-  | "saving-details"
+  | "saving-metadata"
   | "error";
 
 type DelegationStage = "idle" | "wallet" | "pending" | "error";
+
+type StoredProposalLifecycle = {
+  proposalId: bigint;
+  state?: bigint;
+  snapshot?: bigint;
+  deadline?: bigint;
+};
 
 function isBigIntOrNumber(value: unknown): value is bigint | number {
   return typeof value === "bigint" || typeof value === "number";
@@ -53,7 +63,114 @@ function isAddress(value: unknown): value is `0x${string}` {
   return typeof value === "string" && value.startsWith("0x");
 }
 
+function isBigInt(value: unknown): value is bigint {
+  return typeof value === "bigint";
+}
+
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+function extractProposalIdFromReceipt(receipt: unknown): bigint | null {
+  if (!receipt || typeof receipt !== "object" || !("logs" in receipt)) {
+    return null;
+  }
+
+  const logs = Array.isArray(receipt.logs) ? receipt.logs : [];
+  const governorInterface = new Interface(myGovernorAbi);
+
+  for (const log of logs) {
+    if (
+      !log ||
+      typeof log !== "object" ||
+      !("address" in log) ||
+      !("topics" in log) ||
+      !("data" in log)
+    ) {
+      continue;
+    }
+
+    if (
+      typeof log.address !== "string" ||
+      log.address.toLowerCase() !== MY_GOVERNOR_ADDRESS.toLowerCase()
+    ) {
+      continue;
+    }
+
+    if (!Array.isArray(log.topics)) {
+      continue;
+    }
+
+    try {
+      const parsedLog = governorInterface.parseLog({
+        topics: log.topics as string[],
+        data: typeof log.data === "string" ? log.data : "0x",
+      });
+
+      if (parsedLog?.name !== "ProposalCreated") {
+        continue;
+      }
+
+      const proposalId = parsedLog.args?.proposalId ?? parsedLog.args?.[0];
+
+      if (isBigInt(proposalId)) {
+        return proposalId;
+      }
+    } catch (error) {
+      console.error("PROPOSAL_CREATED_EVENT_DECODE_ERROR", error);
+    }
+  }
+
+  return null;
+}
+
+async function deriveProposalId({
+  action,
+  proposalDescription,
+}: {
+  action: ReturnType<typeof buildProposalAction>;
+  proposalDescription: string;
+}): Promise<bigint | null> {
+  try {
+    const magic = getMagicClient();
+    const provider = new BrowserProvider(magic.rpcProvider);
+    const governorContract = new Contract(
+      MY_GOVERNOR_ADDRESS,
+      myGovernorAbi,
+      provider,
+    );
+
+    const descriptionHash = buildDescriptionHash(proposalDescription);
+
+    if (typeof governorContract.getProposalId === "function") {
+      const proposalId = await governorContract.getProposalId(
+        action.targets,
+        action.values,
+        action.calldatas,
+        descriptionHash,
+      );
+
+      if (isBigInt(proposalId)) {
+        return proposalId;
+      }
+    }
+
+    if (typeof governorContract.hashProposal === "function") {
+      const proposalId = await governorContract.hashProposal(
+        action.targets,
+        action.values,
+        action.calldatas,
+        descriptionHash,
+      );
+
+      if (isBigInt(proposalId)) {
+        return proposalId;
+      }
+    }
+  } catch (error) {
+    console.error("PROPOSAL_ID_DERIVATION_ERROR", error);
+  }
+
+  return null;
+}
 
 export default function CreateProposalClient({
   origin,
@@ -64,6 +181,7 @@ export default function CreateProposalClient({
 
   const [proposalText, setProposalText] = useState("");
   const [details, setDetails] = useState("");
+  const [category, setCategory] = useState<ProposalCategory | "">("");
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [submissionStage, setSubmissionStage] =
     useState<SubmissionStage>("idle");
@@ -73,8 +191,13 @@ export default function CreateProposalClient({
     useState<DelegationStage>("idle");
   const [delegationError, setDelegationError] = useState<string | null>(null);
 
+  const [storedProposalLifecycle, setStoredProposalLifecycle] =
+    useState<StoredProposalLifecycle | null>(null);
+  const [hasMetadataWriteStarted, setHasMetadataWriteStarted] = useState(false);
+  const [hasCreatedProposalId, setHasCreatedProposalId] = useState(false);
+  const [governorTxHash, setGovernorTxHash] = useState<string | null>(null);
+
   const createdProposalIdRef = useRef<bigint | null>(null);
-  const didStartRegistryWriteRef = useRef(false);
 
   const returnHref = getProposalReturnHref(origin);
 
@@ -133,17 +256,6 @@ export default function CreateProposalClient({
     },
   });
 
-  const governorWrite = useWriteContract();
-  const registryWrite = useWriteContract();
-
-  const governorReceipt = useWaitForTransactionReceipt({
-    hash: governorWrite.data,
-  });
-
-  const registryReceipt = useWaitForTransactionReceipt({
-    hash: registryWrite.data,
-  });
-
   const proposalTitle = buildProposalTitle(proposalText);
   const proposalSummary = buildProposalSummary(details);
   const proposalDescription = buildProposalDescription({
@@ -154,23 +266,19 @@ export default function CreateProposalClient({
   const action = useMemo(() => buildProposalAction(), []);
 
   const isSubmittingProposal =
-    governorWrite.isPending ||
-    governorReceipt.isLoading ||
-    registryWrite.isPending ||
-    registryReceipt.isLoading;
+    submissionStage === "wallet-governor" ||
+    submissionStage === "creating-proposal" ||
+    submissionStage === "saving-metadata";
 
   const isDelegationBusy =
     delegationStage === "wallet" || delegationStage === "pending";
 
-  const isSubmissionSuccess = registryReceipt.isSuccess;
-
-  const isAwaitingRegistryWallet =
-    governorReceipt.isSuccess &&
-    !registryWrite.data &&
-    !registryWrite.isPending &&
-    !registryReceipt.isLoading &&
-    !registryReceipt.isSuccess &&
-    didStartRegistryWriteRef.current;
+  const isSubmissionSuccess =
+    submissionStage === "idle" &&
+    !isReviewOpen &&
+    hasMetadataWriteStarted &&
+    !submissionError &&
+    hasCreatedProposalId;
 
   const readinessState = useMemo(() => {
     if (accountReadiness.isCheckingAccount) {
@@ -294,53 +402,17 @@ export default function CreateProposalClient({
     votes,
   ]);
 
-  useEffect(() => {
-    if (
-      !governorReceipt.isSuccess ||
-      createdProposalIdRef.current !== null ||
-      !accountAddress ||
-      didStartRegistryWriteRef.current
-    ) {
-      return;
-    }
-
-    const proposalId = undefined;
-
-    if (typeof proposalId !== "bigint") {
-      return;
-    }
-
-    createdProposalIdRef.current = proposalId;
-    didStartRegistryWriteRef.current = true;
-
-    try {
-      registryWrite.writeContract({
-        abi: proposalRegistryAbi,
-        address: PROPOSAL_REGISTRY_ADDRESS,
-        functionName: "recordEntry",
-        args: [proposalId, proposalDescription, accountAddress],
-      });
-    } catch (error) {
-      console.error("PROPOSAL_REGISTRY_WRITE_ERROR", error);
-
-      queueMicrotask(() => {
-        setSubmissionStage("error");
-        setSubmissionError(
-          error instanceof Error
-            ? error.message
-            : "We could not save your proposal details.",
-        );
-      });
-    }
-  }, [
-    accountAddress,
-    governorReceipt.isSuccess,
-    proposalDescription,
-    registryWrite,
-  ]);
+  function resetSubmissionFlow() {
+    setSubmissionError(null);
+    setStoredProposalLifecycle(null);
+    setHasMetadataWriteStarted(false);
+    setHasCreatedProposalId(false);
+    setGovernorTxHash(null);
+    createdProposalIdRef.current = null;
+  }
 
   function handleOpenReview() {
-    if (!readinessState.canReview) {
+    if (!readinessState.canReview || !category) {
       return;
     }
 
@@ -392,26 +464,110 @@ export default function CreateProposalClient({
     }
   }
 
-  function handleSubmitGovernorProposal() {
+  async function handleSubmitGovernorProposal() {
+    if (!accountAddress || !category) {
+      return;
+    }
+
     try {
-      setSubmissionError(null);
+      resetSubmissionFlow();
       setSubmissionStage("wallet-governor");
 
-      governorWrite.writeContract({
-        abi: myGovernorAbi,
-        address: MY_GOVERNOR_ADDRESS,
-        functionName: "propose",
-        args: [
-          action.targets,
-          action.values,
-          action.calldatas,
-          proposalDescription,
-        ],
+      const magic = getMagicClient();
+      const provider = new BrowserProvider(magic.rpcProvider);
+      const signer = await provider.getSigner();
+
+      const governorContract = new Contract(
+        MY_GOVERNOR_ADDRESS,
+        myGovernorAbi,
+        signer,
+      );
+
+      console.log("PROPOSAL_DEBUG", {
+        proposalThreshold,
+        balance,
+        votes,
+        delegatedTo,
+        targets: action.targets,
+        values: action.values,
+        calldatas: action.calldatas,
+        description: proposalDescription,
       });
 
+      // try {
+      //   await governorContract.propose.staticCall(
+      //     action.targets,
+      //     action.values,
+      //     action.calldatas,
+      //     proposalDescription,
+      //   );
+      //   console.log("PROPOSAL_STATIC_CALL_OK");
+      // } catch (error) {
+      //   console.error("PROPOSAL_STATIC_CALL_ERROR", error);
+      //   throw error;
+      // }
+
+      const governorTx = await governorContract.propose(
+        action.targets,
+        action.values,
+        action.calldatas,
+        proposalDescription,
+      );
+
+      setGovernorTxHash(governorTx.hash ?? null);
       setSubmissionStage("creating-proposal");
+
+      const governorReceipt =
+        (await governorTx.wait()) as TransactionReceipt | null;
+
+      if (!governorReceipt) {
+        throw new Error("Governor transaction receipt not found.");
+      }
+
+      let proposalId = extractProposalIdFromReceipt(governorReceipt);
+
+      if (!proposalId) {
+        proposalId = await deriveProposalId({
+          action,
+          proposalDescription,
+        });
+      }
+
+      if (!isBigInt(proposalId)) {
+        throw new Error("Unable to determine the canonical proposal ID.");
+      }
+
+      createdProposalIdRef.current = proposalId;
+      setHasCreatedProposalId(true);
+      setStoredProposalLifecycle({ proposalId });
+
+      setHasMetadataWriteStarted(true);
+      setSubmissionStage("saving-metadata");
+
+      const response = await fetch("/api/proposals", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          proposalId: proposalId.toString(),
+          title: proposalTitle,
+          excerpt: proposalSummary || proposalTitle,
+          description: proposalDescription,
+          category,
+          proposerAddress: accountAddress,
+          governorTxHash: governorTx.hash ?? null,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Proposal metadata request failed.");
+      }
+
+      setIsReviewOpen(false);
+      setSubmissionStage("idle");
     } catch (error) {
-      console.error("GOVERNOR_PROPOSAL_WRITE_ERROR", error);
+      console.error("GOVERNOR_PROPOSAL_SUBMISSION_ERROR", error);
       setSubmissionStage("error");
       setSubmissionError(
         error instanceof Error
@@ -447,37 +603,9 @@ export default function CreateProposalClient({
   const showDelegationHelper =
     delegationStage === "wallet" || delegationStage === "pending";
 
-  const showSubmissionWalletHelper =
-    submissionStage === "wallet-governor" || isAwaitingRegistryWallet;
+  const showSubmissionWalletHelper = submissionStage === "wallet-governor";
 
-  const showSavingDetailsHelper = submissionStage === "saving-details";
-
-  const primaryButton = readinessState.needsDelegation ? (
-    <button
-      type="button"
-      className="button button--primary"
-      onClick={() => {
-        void handleEnableProposal();
-      }}
-      disabled={isDelegationBusy || !accountAddress}
-    >
-      Enable proposal
-    </button>
-  ) : (
-    <button
-      type="button"
-      className="button button--primary"
-      onClick={handleOpenReview}
-      disabled={
-        !readinessState.canReview ||
-        proposalText.trim().length === 0 ||
-        isSubmittingProposal ||
-        isDelegationBusy
-      }
-    >
-      Review proposal
-    </button>
-  );
+  const showSavingMetadataHelper = submissionStage === "saving-metadata";
 
   return (
     <>
@@ -498,6 +626,31 @@ export default function CreateProposalClient({
             gap: 16,
           }}
         >
+          <label style={{ display: "grid", gap: 8 }}>
+            <span style={{ fontWeight: 600 }}>Category</span>
+            <select
+              value={category}
+              onChange={(event) =>
+                setCategory(event.target.value as ProposalCategory | "")
+              }
+              required
+              style={{
+                padding: "12px 14px",
+                borderRadius: 12,
+                border: "1px solid rgba(15, 23, 42, 0.12)",
+                background: "white",
+                fontSize: 16,
+              }}
+            >
+              <option value="">Select a category</option>
+              {PROPOSAL_CATEGORY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <label style={{ display: "grid", gap: 8 }}>
             <span style={{ fontWeight: 600 }}>
               What would you like the group to consider?
@@ -564,9 +717,21 @@ export default function CreateProposalClient({
             </p>
           ) : null}
 
-          {showSavingDetailsHelper ? (
+          {showSavingMetadataHelper ? (
             <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Saving proposal details.
+              Saving proposal category.
+            </p>
+          ) : null}
+
+          {storedProposalLifecycle?.proposalId ? (
+            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
+              Proposal ID ready: {storedProposalLifecycle.proposalId.toString()}
+            </p>
+          ) : null}
+
+          {governorTxHash ? (
+            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
+              Governor transaction submitted.
             </p>
           ) : null}
 
@@ -581,12 +746,38 @@ export default function CreateProposalClient({
               Cancel
             </Link>
 
-            {primaryButton}
+            {readinessState.needsDelegation ? (
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={() => {
+                  void handleEnableProposal();
+                }}
+                disabled={isDelegationBusy || !accountAddress}
+              >
+                Enable proposal
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={handleOpenReview}
+                disabled={
+                  !readinessState.canReview ||
+                  !category ||
+                  proposalText.trim().length === 0 ||
+                  isSubmittingProposal ||
+                  isDelegationBusy
+                }
+              >
+                Review proposal
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      {isReviewOpen && !isSubmissionSuccess ? (
+      {isReviewOpen ? (
         <div
           role="dialog"
           aria-modal="true"
@@ -637,6 +828,15 @@ export default function CreateProposalClient({
             >
               <div>
                 <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
+                  Category
+                </p>
+                <p style={{ fontWeight: 600, margin: 0 }}>
+                  {category ? getProposalCategoryLabel(category) : ""}
+                </p>
+              </div>
+
+              <div>
+                <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
                   Proposal
                 </p>
                 <p style={{ fontWeight: 600, margin: 0 }}>{proposalTitle}</p>
@@ -670,9 +870,9 @@ export default function CreateProposalClient({
               </p>
             ) : null}
 
-            {showSavingDetailsHelper ? (
+            {showSavingMetadataHelper ? (
               <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
-                Saving proposal details.
+                Saving proposal category.
               </p>
             ) : null}
 
@@ -696,8 +896,10 @@ export default function CreateProposalClient({
               <button
                 type="button"
                 className="button button--primary"
-                onClick={handleSubmitGovernorProposal}
-                disabled={isSubmittingProposal}
+                onClick={() => {
+                  void handleSubmitGovernorProposal();
+                }}
+                disabled={isSubmittingProposal || !category}
               >
                 {isSubmittingProposal ? "Continuing..." : "Accept and continue"}
               </button>
