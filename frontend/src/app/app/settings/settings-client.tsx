@@ -1,14 +1,8 @@
 "use client";
 
-import closeAccountDelegateAbi from "@/abi/CloseAccountDelegate.json";
 import { getMagicClient } from "@/lib/auth/magic-client";
 import type { UserProfile } from "@/types/user";
-import {
-  BrowserProvider,
-  Contract,
-  getAddress,
-  type Eip1193Provider,
-} from "ethers";
+import { getAddress, type Eip1193Provider } from "ethers";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -38,6 +32,7 @@ type PrepareResponse = {
   recipientAddress?: string;
   relayerAddress?: string | null;
   closeDeadline?: string | null;
+  closeNonce?: string;
 };
 
 type StoreAuthorizationResponse = {
@@ -210,6 +205,7 @@ export default function SettingsClient({ user }: SettingsClientProps) {
   >(null);
   const [relayerAddress, setRelayerAddress] = useState<string | null>(null);
   const [closeDeadline, setCloseDeadline] = useState<string | null>(null);
+  const [closeNonce, setCloseNonce] = useState<string | null>(null);
 
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
 
@@ -305,6 +301,7 @@ export default function SettingsClient({ user }: SettingsClientProps) {
     setDelegateContractAddress(null);
     setRelayerAddress(null);
     setCloseDeadline(null);
+    setCloseNonce(null);
     setCloseWalletAddress(user.walletAddress ?? null);
   }
 
@@ -369,6 +366,7 @@ export default function SettingsClient({ user }: SettingsClientProps) {
       setDelegateContractAddress(data.delegateContractAddress);
       setRelayerAddress(data.relayerAddress);
       setCloseDeadline(data.closeDeadline);
+      setCloseNonce(data.closeNonce ?? "0");
 
       setDeleteMessage("Ready for wallet authorization.");
       setCloseStep("ready_to_sign");
@@ -386,7 +384,8 @@ export default function SettingsClient({ user }: SettingsClientProps) {
       !closeChainId ||
       !closeWalletAddress ||
       !relayerAddress ||
-      !closeDeadline
+      !closeDeadline ||
+      closeNonce == null
     ) {
       setCloseError("Missing close attempt details. Please start again.");
       setDeleteMessage("Missing close attempt details. Please start again.");
@@ -429,25 +428,11 @@ export default function SettingsClient({ user }: SettingsClientProps) {
         throw new Error("Magic returned an incomplete authorization payload.");
       }
 
-      setDeleteMessage("Reading close nonce from delegated account...");
-
-      const ethersProvider = new BrowserProvider(provider);
       const delegatedAccountAddress = getAddress(closeWalletAddress);
       const normalizedDelegateContractAddress = getAddress(
         delegateContractAddress,
       );
-
-      console.log("network", await ethersProvider.getNetwork());
-      console.log("delegatedAccountAddress", delegatedAccountAddress);
-      console.log("delegateContractAddress", normalizedDelegateContractAddress);
-
-      const delegatedRead = new Contract(
-        delegatedAccountAddress,
-        closeAccountDelegateAbi,
-        ethersProvider,
-      );
-
-      const nonce = (await delegatedRead.closeNonce()) as bigint;
+      const nonce = BigInt(closeNonce);
 
       const deadlineSeconds = BigInt(
         Math.floor(new Date(closeDeadline).getTime() / 1000),

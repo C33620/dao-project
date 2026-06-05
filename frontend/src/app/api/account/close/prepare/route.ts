@@ -1,17 +1,25 @@
-import {
-  createCloseAttempt,
-  getActiveCloseAttemptByIssuer,
-} from "@/lib/repositories/accountCloseAttempts";
+import closeAccountDelegateAbi from "@/abi/CloseAccountDelegate.json";
+import { createCloseAttempt } from "@/lib/repositories/accountCloseAttempts";
 import { getUserDocumentByIssuer } from "@/lib/repositories/users";
 import { getSession } from "@/lib/services/session";
 import { isAddress } from "ethers";
 import { NextResponse } from "next/server";
+import { createPublicClient, http } from "viem";
+import { sepolia } from "viem/chains";
 
 export const runtime = "nodejs";
 
 type ClosePrepareRequestBody = {
   confirmation?: string;
 };
+
+function isDelegated7702Code(code: `0x${string}` | undefined) {
+  if (!code || code === "0x") {
+    return false;
+  }
+
+  return code.toLowerCase().startsWith("0xef0100");
+}
 
 export async function POST(request: Request) {
   const session = await getSession();
@@ -62,6 +70,7 @@ export async function POST(request: Request) {
     process.env.CLOSE_ACCOUNT_DELEGATE_CONTRACT_ADDRESS;
   const relayerAddress = process.env.RELAYER_ADDRESS;
   const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "11155111");
+  const rpcUrl = process.env.TREASURY_RPC_URL;
 
   if (!recipientAddress || !isAddress(recipientAddress)) {
     return NextResponse.json(
@@ -84,53 +93,76 @@ export async function POST(request: Request) {
     );
   }
 
-  const existing = await getActiveCloseAttemptByIssuer(session.issuer);
-  if (existing) {
-    if (!existing.relayerAddress || !existing.closeDeadline) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Stored close attempt is incomplete. Please start again.",
-        },
-        { status: 400 },
-      );
-    }
+  if (!Number.isInteger(chainId) || chainId <= 0) {
+    return NextResponse.json(
+      { ok: false, error: "Chain configuration is invalid." },
+      { status: 500 },
+    );
+  }
 
-    return NextResponse.json({
-      ok: true,
-      attemptKey: existing.attemptKey,
-      walletAddress: existing.walletAddress,
-      chainId: existing.chainId,
-      expiresAt: existing.expiresAt.toISOString(),
-      delegateContractAddress: existing.delegateContractAddress,
-      recipientAddress: existing.recipientAddress,
-      relayerAddress: existing.relayerAddress,
-      closeDeadline: existing.closeDeadline.toISOString(),
-    });
+  if (!rpcUrl) {
+    return NextResponse.json(
+      { ok: false, error: "RPC configuration is invalid." },
+      { status: 500 },
+    );
   }
 
   const closeDeadline = new Date(Date.now() + 10 * 60 * 1000);
 
-  const attempt = await createCloseAttempt({
-    userId: user.id,
-    issuer: session.issuer,
-    walletAddress: user.walletAddress,
-    chainId,
-    recipientAddress,
-    delegateContractAddress,
-    relayerAddress,
-    closeDeadline,
-  });
+  try {
+    const publicClient = createPublicClient({
+      chain: sepolia,
+      transport: http(rpcUrl),
+    });
 
-  return NextResponse.json({
-    ok: true,
-    attemptKey: attempt.attemptKey,
-    walletAddress: attempt.walletAddress,
-    chainId: attempt.chainId,
-    expiresAt: attempt.expiresAt.toISOString(),
-    delegateContractAddress: attempt.delegateContractAddress,
-    recipientAddress: attempt.recipientAddress,
-    relayerAddress: attempt.relayerAddress,
-    closeDeadline: attempt.closeDeadline?.toISOString() ?? null,
-  });
+    const walletAddress = user.walletAddress as `0x${string}`;
+    const code = await publicClient.getCode({
+      address: walletAddress,
+    });
+
+    const isDelegated = isDelegated7702Code(code);
+    let closeNonce = "0";
+
+    if (isDelegated) {
+      const liveNonce = (await publicClient.readContract({
+        address: walletAddress,
+        abi: closeAccountDelegateAbi,
+        functionName: "closeNonce",
+      })) as bigint;
+
+      closeNonce = liveNonce.toString();
+    }
+
+    const attempt = await createCloseAttempt({
+      userId: user.id,
+      issuer: session.issuer,
+      walletAddress: user.walletAddress,
+      chainId,
+      recipientAddress,
+      delegateContractAddress,
+      relayerAddress,
+      closeDeadline,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      attemptKey: attempt.attemptKey,
+      walletAddress: attempt.walletAddress,
+      chainId: attempt.chainId,
+      expiresAt: attempt.expiresAt.toISOString(),
+      delegateContractAddress: attempt.delegateContractAddress,
+      recipientAddress: attempt.recipientAddress,
+      relayerAddress: attempt.relayerAddress,
+      closeDeadline: attempt.closeDeadline?.toISOString() ?? null,
+      closeNonce,
+      isDelegated,
+    });
+  } catch (error) {
+    console.error("close prepare failed", error);
+
+    return NextResponse.json(
+      { ok: false, error: "We could not prepare account closure." },
+      { status: 500 },
+    );
+  }
 }

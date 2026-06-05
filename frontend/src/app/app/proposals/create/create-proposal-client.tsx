@@ -3,6 +3,7 @@
 import governanceTokenAbi from "@/abi/GovernanceToken.json";
 import myGovernorAbi from "@/abi/MyGovernor.json";
 import proposalRegistryAbi from "@/abi/ProposalRegistry.json";
+import { getMagicClient } from "@/lib/auth/magic-client";
 import {
   buildProposalAction,
   buildProposalDescription,
@@ -16,10 +17,10 @@ import {
   MY_GOVERNOR_ADDRESS,
   PROPOSAL_REGISTRY_ADDRESS,
 } from "@/lib/web3/contracts";
+import { BrowserProvider, Contract } from "ethers";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  useAccount,
   useReadContract,
   useWaitForTransactionReceipt,
   useWriteContract,
@@ -27,6 +28,11 @@ import {
 
 type CreateProposalClientProps = {
   origin: ProposalOrigin;
+  walletAddress: `0x${string}` | null;
+  accountReadiness: {
+    isCheckingAccount: boolean;
+    isAccountReadyFromAppState: boolean;
+  };
 };
 
 type SubmissionStage =
@@ -34,28 +40,41 @@ type SubmissionStage =
   | "review"
   | "wallet-governor"
   | "creating-proposal"
-  | "wallet-registry"
   | "saving-details"
-  | "success"
   | "error";
+
+type DelegationStage = "idle" | "wallet" | "pending" | "error";
 
 function isBigIntOrNumber(value: unknown): value is bigint | number {
   return typeof value === "bigint" || typeof value === "number";
 }
 
+function isAddress(value: unknown): value is `0x${string}` {
+  return typeof value === "string" && value.startsWith("0x");
+}
+
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
 export default function CreateProposalClient({
   origin,
+  walletAddress,
+  accountReadiness,
 }: CreateProposalClientProps) {
-  const { address, isConnected } = useAccount();
+  const accountAddress = walletAddress;
+
   const [proposalText, setProposalText] = useState("");
   const [details, setDetails] = useState("");
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [submissionStage, setSubmissionStage] =
     useState<SubmissionStage>("idle");
   const [submissionError, setSubmissionError] = useState<string | null>(null);
-  const [createdProposalId, setCreatedProposalId] = useState<bigint | null>(
-    null,
-  );
+
+  const [delegationStage, setDelegationStage] =
+    useState<DelegationStage>("idle");
+  const [delegationError, setDelegationError] = useState<string | null>(null);
+
+  const createdProposalIdRef = useRef<bigint | null>(null);
+  const didStartRegistryWriteRef = useRef(false);
 
   const returnHref = getProposalReturnHref(origin);
 
@@ -70,16 +89,32 @@ export default function CreateProposalClient({
   });
 
   const {
+    data: balance,
+    isLoading: isLoadingBalance,
+    isError: isBalanceError,
+    refetch: refetchBalance,
+  } = useReadContract({
+    abi: governanceTokenAbi,
+    address: GOVERNANCE_TOKEN_ADDRESS,
+    functionName: "balanceOf",
+    args: accountAddress ? [accountAddress] : undefined,
+    query: {
+      enabled: Boolean(accountAddress),
+    },
+  });
+
+  const {
     data: delegatedTo,
     isLoading: isLoadingDelegate,
     isError: isDelegateError,
+    refetch: refetchDelegates,
   } = useReadContract({
     abi: governanceTokenAbi,
     address: GOVERNANCE_TOKEN_ADDRESS,
     functionName: "delegates",
-    args: address ? [address] : undefined,
+    args: accountAddress ? [accountAddress] : undefined,
     query: {
-      enabled: Boolean(address),
+      enabled: Boolean(accountAddress),
     },
   });
 
@@ -87,92 +122,16 @@ export default function CreateProposalClient({
     data: votes,
     isLoading: isLoadingVotes,
     isError: isVotesError,
+    refetch: refetchVotes,
   } = useReadContract({
     abi: governanceTokenAbi,
     address: GOVERNANCE_TOKEN_ADDRESS,
     functionName: "getVotes",
-    args: address ? [address] : undefined,
+    args: accountAddress ? [accountAddress] : undefined,
     query: {
-      enabled: Boolean(address),
+      enabled: Boolean(accountAddress),
     },
   });
-
-  const readinessState = useMemo(() => {
-    if (!isConnected || !address) {
-      return {
-        label: "Setup required",
-        description:
-          "We need to finish preparing your account before you can create a proposal.",
-        canContinue: false,
-      };
-    }
-
-    if (isLoadingThreshold || isLoadingDelegate || isLoadingVotes) {
-      return {
-        label: "Checking your account",
-        description: "We are getting everything ready for proposal creation.",
-        canContinue: false,
-      };
-    }
-
-    if (
-      isThresholdError ||
-      isDelegateError ||
-      isVotesError ||
-      !isBigIntOrNumber(proposalThreshold) ||
-      !isBigIntOrNumber(votes)
-    ) {
-      return {
-        label: "Proposal creation is unavailable right now",
-        description: "Please try again in a moment.",
-        canContinue: false,
-      };
-    }
-
-    const hasDelegate = Boolean(
-      delegatedTo &&
-        typeof delegatedTo === "string" &&
-        delegatedTo !== "0x0000000000000000000000000000000000000000",
-    );
-
-    const hasEnoughVotes = votes >= proposalThreshold;
-
-    if (!hasDelegate || !hasEnoughVotes) {
-      return {
-        label: "Setup required",
-        description:
-          "We need to finish preparing your account before you can create a proposal.",
-        canContinue: false,
-      };
-    }
-
-    return {
-      label: "Ready to create",
-      description: "Write your proposal, review it, and continue when ready.",
-      canContinue: true,
-    };
-  }, [
-    address,
-    delegatedTo,
-    isConnected,
-    isDelegateError,
-    isLoadingDelegate,
-    isLoadingThreshold,
-    isLoadingVotes,
-    isThresholdError,
-    isVotesError,
-    proposalThreshold,
-    votes,
-  ]);
-
-  const proposalTitle = buildProposalTitle(proposalText);
-  const proposalSummary = buildProposalSummary(details);
-  const proposalDescription = buildProposalDescription({
-    proposalText,
-    details,
-  });
-
-  const action = useMemo(() => buildProposalAction(), []);
 
   const governorWrite = useWriteContract();
   const registryWrite = useWriteContract();
@@ -185,18 +144,203 @@ export default function CreateProposalClient({
     hash: registryWrite.data,
   });
 
-  const isSubmitting =
+  const proposalTitle = buildProposalTitle(proposalText);
+  const proposalSummary = buildProposalSummary(details);
+  const proposalDescription = buildProposalDescription({
+    proposalText,
+    details,
+  });
+
+  const action = useMemo(() => buildProposalAction(), []);
+
+  const isSubmittingProposal =
     governorWrite.isPending ||
     governorReceipt.isLoading ||
     registryWrite.isPending ||
     registryReceipt.isLoading;
 
-  function deriveProposalId() {
-    return undefined;
-  }
+  const isDelegationBusy =
+    delegationStage === "wallet" || delegationStage === "pending";
+
+  const isSubmissionSuccess = registryReceipt.isSuccess;
+
+  const isAwaitingRegistryWallet =
+    governorReceipt.isSuccess &&
+    !registryWrite.data &&
+    !registryWrite.isPending &&
+    !registryReceipt.isLoading &&
+    !registryReceipt.isSuccess &&
+    didStartRegistryWriteRef.current;
+
+  const readinessState = useMemo(() => {
+    if (accountReadiness.isCheckingAccount) {
+      return {
+        label: "Checking your account",
+        description:
+          "We’re checking whether your account is ready for proposals.",
+        canReview: false,
+        needsDelegation: false,
+      };
+    }
+
+    if (!accountReadiness.isAccountReadyFromAppState) {
+      return {
+        label: "Setup required",
+        description: "We’re still preparing your account for governance.",
+        canReview: false,
+        needsDelegation: false,
+      };
+    }
+
+    if (!accountAddress) {
+      return {
+        label: "Setup required",
+        description: "We’re still preparing your account for governance.",
+        canReview: false,
+        needsDelegation: false,
+      };
+    }
+
+    if (
+      isLoadingThreshold ||
+      isLoadingBalance ||
+      isLoadingDelegate ||
+      isLoadingVotes
+    ) {
+      return {
+        label: "Checking your account",
+        description:
+          "We’re checking whether your account is ready for proposals.",
+        canReview: false,
+        needsDelegation: false,
+      };
+    }
+
+    if (
+      isThresholdError ||
+      isBalanceError ||
+      isDelegateError ||
+      isVotesError ||
+      !isBigIntOrNumber(proposalThreshold) ||
+      !isBigIntOrNumber(balance) ||
+      !isBigIntOrNumber(votes)
+    ) {
+      return {
+        label: "Checking your account",
+        description:
+          "We’re checking whether your account is ready for proposals.",
+        canReview: false,
+        needsDelegation: false,
+      };
+    }
+
+    const hasBalance = balance > 0;
+    const isSelfDelegated =
+      isAddress(delegatedTo) &&
+      delegatedTo !== ZERO_ADDRESS &&
+      delegatedTo.toLowerCase() === accountAddress.toLowerCase();
+    const hasEnoughVotes = votes >= proposalThreshold;
+
+    if (!hasBalance) {
+      return {
+        label: "Setup required",
+        description:
+          "Your voting power is on the way. If it does not arrive soon, please contact an admin.",
+        canReview: false,
+        needsDelegation: false,
+      };
+    }
+
+    if (!isSelfDelegated) {
+      return {
+        label: "Setup required",
+        description: "Enable proposals by activating your voting power.",
+        canReview: false,
+        needsDelegation: true,
+      };
+    }
+
+    if (!hasEnoughVotes) {
+      return {
+        label: "Setup required",
+        description:
+          "Your account is almost ready for proposals, but voting power has not reached the proposal threshold yet.",
+        canReview: false,
+        needsDelegation: false,
+      };
+    }
+
+    return {
+      label: "Ready to create",
+      description: "Write your proposal, review it, and continue when ready.",
+      canReview: true,
+      needsDelegation: false,
+    };
+  }, [
+    accountAddress,
+    accountReadiness.isAccountReadyFromAppState,
+    accountReadiness.isCheckingAccount,
+    balance,
+    delegatedTo,
+    isBalanceError,
+    isDelegateError,
+    isLoadingBalance,
+    isLoadingDelegate,
+    isLoadingThreshold,
+    isLoadingVotes,
+    isThresholdError,
+    isVotesError,
+    proposalThreshold,
+    votes,
+  ]);
+
+  useEffect(() => {
+    if (
+      !governorReceipt.isSuccess ||
+      createdProposalIdRef.current !== null ||
+      !accountAddress ||
+      didStartRegistryWriteRef.current
+    ) {
+      return;
+    }
+
+    const proposalId = undefined;
+
+    if (typeof proposalId !== "bigint") {
+      return;
+    }
+
+    createdProposalIdRef.current = proposalId;
+    didStartRegistryWriteRef.current = true;
+
+    try {
+      registryWrite.writeContract({
+        abi: proposalRegistryAbi,
+        address: PROPOSAL_REGISTRY_ADDRESS,
+        functionName: "recordEntry",
+        args: [proposalId, proposalDescription, accountAddress],
+      });
+    } catch (error) {
+      console.error("PROPOSAL_REGISTRY_WRITE_ERROR", error);
+
+      queueMicrotask(() => {
+        setSubmissionStage("error");
+        setSubmissionError(
+          error instanceof Error
+            ? error.message
+            : "We could not save your proposal details.",
+        );
+      });
+    }
+  }, [
+    accountAddress,
+    governorReceipt.isSuccess,
+    proposalDescription,
+    registryWrite,
+  ]);
 
   function handleOpenReview() {
-    if (!readinessState.canContinue) {
+    if (!readinessState.canReview) {
       return;
     }
 
@@ -206,12 +350,46 @@ export default function CreateProposalClient({
   }
 
   function handleCloseReview() {
-    if (isSubmitting) {
+    if (isSubmittingProposal) {
       return;
     }
 
     setIsReviewOpen(false);
     setSubmissionStage("idle");
+  }
+
+  async function handleEnableProposal() {
+    if (!accountAddress || isDelegationBusy) {
+      return;
+    }
+
+    try {
+      setDelegationError(null);
+      setDelegationStage("wallet");
+
+      const magic = getMagicClient();
+      const provider = new BrowserProvider(magic.rpcProvider);
+      const signer = await provider.getSigner();
+
+      const governanceTokenContract = new Contract(
+        GOVERNANCE_TOKEN_ADDRESS,
+        governanceTokenAbi,
+        signer,
+      );
+
+      setDelegationStage("pending");
+
+      const tx = await governanceTokenContract.delegate(accountAddress);
+      await tx.wait();
+
+      await Promise.all([refetchBalance(), refetchDelegates(), refetchVotes()]);
+
+      setDelegationStage("idle");
+    } catch (error) {
+      console.error("SELF_DELEGATION_WRITE_ERROR", error);
+      setDelegationStage("error");
+      setDelegationError("Something went wrong.");
+    }
   }
 
   function handleSubmitGovernorProposal() {
@@ -233,6 +411,7 @@ export default function CreateProposalClient({
 
       setSubmissionStage("creating-proposal");
     } catch (error) {
+      console.error("GOVERNOR_PROPOSAL_WRITE_ERROR", error);
       setSubmissionStage("error");
       setSubmissionError(
         error instanceof Error
@@ -242,33 +421,7 @@ export default function CreateProposalClient({
     }
   }
 
-  if (governorReceipt.isSuccess && createdProposalId === null && address) {
-    const proposalId = deriveProposalId();
-
-    if (typeof proposalId === "bigint") {
-      setCreatedProposalId(proposalId);
-      setSubmissionStage("wallet-registry");
-
-      if (!registryWrite.data && !registryWrite.isPending) {
-        registryWrite.writeContract({
-          abi: proposalRegistryAbi,
-          address: PROPOSAL_REGISTRY_ADDRESS,
-          functionName: "recordEntry",
-          args: [proposalId, proposalDescription, address],
-        });
-        setSubmissionStage("saving-details");
-      }
-    }
-  }
-
-  if (registryReceipt.isSuccess) {
-    if (submissionStage !== "success") {
-      setSubmissionStage("success");
-      setIsReviewOpen(false);
-    }
-  }
-
-  if (submissionStage === "success") {
+  if (isSubmissionSuccess) {
     return (
       <div className="dashboard-section-stack">
         <div className="empty-state empty-state--compact">
@@ -290,6 +443,41 @@ export default function CreateProposalClient({
       </div>
     );
   }
+
+  const showDelegationHelper =
+    delegationStage === "wallet" || delegationStage === "pending";
+
+  const showSubmissionWalletHelper =
+    submissionStage === "wallet-governor" || isAwaitingRegistryWallet;
+
+  const showSavingDetailsHelper = submissionStage === "saving-details";
+
+  const primaryButton = readinessState.needsDelegation ? (
+    <button
+      type="button"
+      className="button button--primary"
+      onClick={() => {
+        void handleEnableProposal();
+      }}
+      disabled={isDelegationBusy || !accountAddress}
+    >
+      Enable proposal
+    </button>
+  ) : (
+    <button
+      type="button"
+      className="button button--primary"
+      onClick={handleOpenReview}
+      disabled={
+        !readinessState.canReview ||
+        proposalText.trim().length === 0 ||
+        isSubmittingProposal ||
+        isDelegationBusy
+      }
+    >
+      Review proposal
+    </button>
+  );
 
   return (
     <>
@@ -350,12 +538,21 @@ export default function CreateProposalClient({
             />
           </label>
 
+          {delegationError ? (
+            <p style={{ color: "rgb(185, 28, 28)" }}>{delegationError}</p>
+          ) : null}
+
           {submissionError ? (
             <p style={{ color: "rgb(185, 28, 28)" }}>{submissionError}</p>
           ) : null}
 
-          {submissionStage === "wallet-governor" ||
-          submissionStage === "wallet-registry" ? (
+          {showDelegationHelper ? (
+            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
+              Action needed to continue.
+            </p>
+          ) : null}
+
+          {showSubmissionWalletHelper ? (
             <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
               Action needed in wallet.
             </p>
@@ -367,7 +564,7 @@ export default function CreateProposalClient({
             </p>
           ) : null}
 
-          {submissionStage === "saving-details" ? (
+          {showSavingDetailsHelper ? (
             <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
               Saving proposal details.
             </p>
@@ -384,23 +581,12 @@ export default function CreateProposalClient({
               Cancel
             </Link>
 
-            <button
-              type="button"
-              className="button button--primary"
-              onClick={handleOpenReview}
-              disabled={
-                !readinessState.canContinue ||
-                proposalText.trim().length === 0 ||
-                isSubmitting
-              }
-            >
-              Review proposal
-            </button>
+            {primaryButton}
           </div>
         </div>
       </div>
 
-      {isReviewOpen ? (
+      {isReviewOpen && !isSubmissionSuccess ? (
         <div
           role="dialog"
           aria-modal="true"
@@ -472,8 +658,7 @@ export default function CreateProposalClient({
               </p>
             ) : null}
 
-            {submissionStage === "wallet-governor" ||
-            submissionStage === "wallet-registry" ? (
+            {showSubmissionWalletHelper ? (
               <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
                 Action needed in wallet.
               </p>
@@ -485,7 +670,7 @@ export default function CreateProposalClient({
               </p>
             ) : null}
 
-            {submissionStage === "saving-details" ? (
+            {showSavingDetailsHelper ? (
               <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
                 Saving proposal details.
               </p>
@@ -503,7 +688,7 @@ export default function CreateProposalClient({
                 type="button"
                 className="button button--secondary"
                 onClick={handleCloseReview}
-                disabled={isSubmitting}
+                disabled={isSubmittingProposal}
               >
                 Back and edit
               </button>
@@ -512,9 +697,9 @@ export default function CreateProposalClient({
                 type="button"
                 className="button button--primary"
                 onClick={handleSubmitGovernorProposal}
-                disabled={isSubmitting}
+                disabled={isSubmittingProposal}
               >
-                {isSubmitting ? "Continuing..." : "Accept and continue"}
+                {isSubmittingProposal ? "Continuing..." : "Accept and continue"}
               </button>
             </div>
           </div>

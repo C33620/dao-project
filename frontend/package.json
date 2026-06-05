@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@magic-sdk/admin": "^2.3.0",
+    "@magiclabs/wagmi-connector": "^2.3.2",
     "@prisma/client": "^6.19.3",
     "@tanstack/react-query": "^5.100.14",
     "bcryptjs": "^3.0.3",

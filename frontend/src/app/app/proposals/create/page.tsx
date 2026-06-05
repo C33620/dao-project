@@ -1,30 +1,77 @@
-import { PageShell } from "@/components/ui/page-shell";
-import { SectionCard } from "@/components/ui/section-card";
+import { getCurrentUser } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { AccountSetupStatus, TreasuryDistributionStatus } from "@prisma/client";
 import CreateProposalClient from "./create-proposal-client";
 
 type CreateProposalPageProps = {
   searchParams?: Promise<{
-    from?: string;
+    origin?: string;
   }>;
 };
+
+type AccountReadinessProps = {
+  isCheckingAccount: boolean;
+  isAccountReadyFromAppState: boolean;
+  walletAddress: `0x${string}` | null;
+};
+
+async function getAccountReadiness(): Promise<AccountReadinessProps> {
+  const user = await getCurrentUser();
+
+  if (!user) {
+    return {
+      isCheckingAccount: false,
+      isAccountReadyFromAppState: false,
+      walletAddress: null,
+    };
+  }
+
+  const setupUser = await db.user.findUnique({
+    where: { id: user.id },
+    select: {
+      accountSetupStatus: true,
+      initialAllocationStatus: true,
+      walletAddress: true,
+    },
+  });
+
+  const isAccountReadyFromAppState =
+    setupUser?.initialAllocationStatus ===
+      TreasuryDistributionStatus.SUCCEEDED ||
+    setupUser?.accountSetupStatus === AccountSetupStatus.READY;
+
+  const walletAddress =
+    typeof setupUser?.walletAddress === "string" &&
+    setupUser.walletAddress.startsWith("0x")
+      ? (setupUser.walletAddress as `0x${string}`)
+      : null;
+
+  return {
+    isCheckingAccount: false,
+    isAccountReadyFromAppState,
+    walletAddress,
+  };
+}
 
 export default async function CreateProposalPage({
   searchParams,
 }: CreateProposalPageProps) {
-  const resolvedSearchParams = (await searchParams) ?? {};
-  const from =
-    resolvedSearchParams.from === "dashboard" ? "dashboard" : "proposals";
+  const params = await searchParams;
+  const origin =
+    params?.origin === "dashboard" || params?.origin === "proposals"
+      ? params.origin
+      : "proposals";
+
+  const accountReadiness = await getAccountReadiness();
 
   return (
-    <PageShell title="" description="">
-      <div className="page-shell__content">
-        <SectionCard
-          title="Create a proposal"
-          description="Prepare a change, review it carefully, and submit it when you are ready."
-        >
-          <CreateProposalClient origin={from} />
-        </SectionCard>
-      </div>
-    </PageShell>
+    <CreateProposalClient
+      origin={origin}
+      accountReadiness={{
+        isCheckingAccount: accountReadiness.isCheckingAccount,
+        isAccountReadyFromAppState: accountReadiness.isAccountReadyFromAppState,
+      }}
+      walletAddress={accountReadiness.walletAddress}
+    />
   );
 }
