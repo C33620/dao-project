@@ -5,6 +5,7 @@ import { getSession } from "@/lib/services/session";
 import { isAddress } from "ethers";
 import { NextResponse } from "next/server";
 import { createPublicClient, http } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 
 export const runtime = "nodejs";
@@ -68,7 +69,10 @@ export async function POST(request: Request) {
   const recipientAddress = process.env.MASTER_WALLET_ADDRESS;
   const delegateContractAddress =
     process.env.CLOSE_ACCOUNT_DELEGATE_CONTRACT_ADDRESS;
-  const relayerAddress = process.env.RELAYER_ADDRESS;
+  const relayerKey = process.env.RELAYER_PRIVATE_KEY;
+  const relayerAddress = relayerKey
+    ? privateKeyToAccount(relayerKey as `0x${string}`).address
+    : null;
   const chainId = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? "11155111");
   const rpcUrl = process.env.TREASURY_RPC_URL;
 

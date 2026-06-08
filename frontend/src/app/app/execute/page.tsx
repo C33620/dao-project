@@ -13,7 +13,7 @@ export default async function ExecutePage() {
       <div className="page-shell__content">
         <SectionCard
           title="Ready or nearly ready"
-          description="These items are closest to the final step."
+          description="These items are passed, queued, or close to execution."
         >
           <div className="execution-list">
             {proposals.length > 0 ? (
@@ -67,7 +67,8 @@ export default async function ExecutePage() {
                 </div>
                 <h2>Nothing is queued right now</h2>
                 <p>
-                  When an item reaches the final stage, it will appear here.
+                  Passed proposals will appear here when they need queueing or
+                  execution.
                 </p>
               </div>
             )}

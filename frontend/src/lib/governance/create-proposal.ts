@@ -1,9 +1,22 @@
 import myGovernorAbi from "@/abi/MyGovernor.json";
 import { MY_GOVERNOR_ADDRESS } from "@/lib/web3/contracts";
 import type { ProposalCategory } from "@/types/governance";
-import { encodeFunctionData, keccak256, stringToHex } from "viem";
+import {
+  encodeFunctionData,
+  keccak256,
+  stringToHex,
+  type Address,
+  type Hex,
+} from "viem";
 
 export type ProposalOrigin = "dashboard" | "proposals";
+
+export type PersistedProposalAction = {
+  targets: Address[];
+  values: bigint[];
+  calldatas: Hex[];
+  descriptionHash: Hex;
+};
 
 export const PROPOSAL_CATEGORY_OPTIONS: Array<{
   value: ProposalCategory;
@@ -54,14 +67,25 @@ export function buildProposalAction() {
   });
 
   return {
-    targets: [MY_GOVERNOR_ADDRESS],
+    targets: [MY_GOVERNOR_ADDRESS as Address],
     values: [BigInt(0)],
-    calldatas: [calldata],
+    calldatas: [calldata as Hex],
   };
 }
 
 export function buildDescriptionHash(description: string) {
   return keccak256(stringToHex(description));
+}
+
+export function buildPersistedProposalAction(
+  description: string,
+): PersistedProposalAction {
+  const action = buildProposalAction();
+
+  return {
+    ...action,
+    descriptionHash: buildDescriptionHash(description),
+  };
 }
 
 export function getProposalReturnHref(origin: ProposalOrigin) {

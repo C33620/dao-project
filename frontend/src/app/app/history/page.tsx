@@ -9,12 +9,12 @@ export default async function HistoryPage() {
   return (
     <PageShell
       title="History"
-      description="A chronological view of the most recent activity in your workspace."
+      description="A chronological view of recent governance lifecycle activity."
     >
       <div className="page-shell__content">
         <SectionCard
           title="Recent activity"
-          description="The newest updates appear first so you can scan what changed."
+          description="The newest lifecycle and participation-related updates appear first."
         >
           <div className="activity-feed">
             {activity.length > 0 ? (
@@ -43,7 +43,8 @@ export default async function HistoryPage() {
                 </div>
                 <h2>No history yet</h2>
                 <p>
-                  Recent activity will appear here once actions are recorded.
+                  Governance lifecycle activity will appear here once proposals
+                  move onchain.
                 </p>
               </div>
             )}

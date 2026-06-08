@@ -4,8 +4,7 @@ import governanceTokenAbi from "@/abi/GovernanceToken.json";
 import myGovernorAbi from "@/abi/MyGovernor.json";
 import { getMagicClient } from "@/lib/auth/magic-client";
 import {
-  buildDescriptionHash,
-  buildProposalAction,
+  buildPersistedProposalAction,
   buildProposalDescription,
   buildProposalSummary,
   buildProposalTitle,
@@ -123,11 +122,15 @@ function extractProposalIdFromReceipt(receipt: unknown): bigint | null {
 }
 
 async function deriveProposalId({
-  action,
-  proposalDescription,
+  targets,
+  values,
+  calldatas,
+  descriptionHash,
 }: {
-  action: ReturnType<typeof buildProposalAction>;
-  proposalDescription: string;
+  targets: readonly `0x${string}`[];
+  values: readonly bigint[];
+  calldatas: readonly `0x${string}`[];
+  descriptionHash: `0x${string}`;
 }): Promise<bigint | null> {
   try {
     const magic = getMagicClient();
@@ -138,13 +141,11 @@ async function deriveProposalId({
       provider,
     );
 
-    const descriptionHash = buildDescriptionHash(proposalDescription);
-
     if (typeof governorContract.getProposalId === "function") {
       const proposalId = await governorContract.getProposalId(
-        action.targets,
-        action.values,
-        action.calldatas,
+        targets,
+        values,
+        calldatas,
         descriptionHash,
       );
 
@@ -155,9 +156,9 @@ async function deriveProposalId({
 
     if (typeof governorContract.hashProposal === "function") {
       const proposalId = await governorContract.hashProposal(
-        action.targets,
-        action.values,
-        action.calldatas,
+        targets,
+        values,
+        calldatas,
         descriptionHash,
       );
 
@@ -263,7 +264,10 @@ export default function CreateProposalClient({
     details,
   });
 
-  const action = useMemo(() => buildProposalAction(), []);
+  const action = useMemo(
+    () => buildPersistedProposalAction(proposalDescription),
+    [proposalDescription],
+  );
 
   const isSubmittingProposal =
     submissionStage === "wallet-governor" ||
@@ -492,20 +496,8 @@ export default function CreateProposalClient({
         values: action.values,
         calldatas: action.calldatas,
         description: proposalDescription,
+        descriptionHash: action.descriptionHash,
       });
-
-      // try {
-      //   await governorContract.propose.staticCall(
-      //     action.targets,
-      //     action.values,
-      //     action.calldatas,
-      //     proposalDescription,
-      //   );
-      //   console.log("PROPOSAL_STATIC_CALL_OK");
-      // } catch (error) {
-      //   console.error("PROPOSAL_STATIC_CALL_ERROR", error);
-      //   throw error;
-      // }
 
       const governorTx = await governorContract.propose(
         action.targets,
@@ -528,8 +520,10 @@ export default function CreateProposalClient({
 
       if (!proposalId) {
         proposalId = await deriveProposalId({
-          action,
-          proposalDescription,
+          targets: action.targets,
+          values: action.values,
+          calldatas: action.calldatas,
+          descriptionHash: action.descriptionHash,
         });
       }
 
@@ -554,9 +548,13 @@ export default function CreateProposalClient({
           title: proposalTitle,
           excerpt: proposalSummary || proposalTitle,
           description: proposalDescription,
+          descriptionHash: action.descriptionHash,
           category,
           proposerAddress: accountAddress,
           governorTxHash: governorTx.hash ?? null,
+          targets: action.targets,
+          values: action.values.map((value) => value.toString()),
+          calldatas: action.calldatas,
         }),
       });
 
@@ -719,7 +717,7 @@ export default function CreateProposalClient({
 
           {showSavingMetadataHelper ? (
             <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Saving proposal category.
+              Saving proposal metadata.
             </p>
           ) : null}
 
@@ -872,7 +870,7 @@ export default function CreateProposalClient({
 
             {showSavingMetadataHelper ? (
               <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
-                Saving proposal category.
+                Saving proposal metadata.
               </p>
             ) : null}
 

@@ -9,3 +9,4 @@ export const PROPOSAL_REGISTRY_ADDRESS =
 
 export const APPROX_SECONDS_PER_BLOCK = 12;
 export const MIN_VOTING_PERIOD_BLOCKS = 1;
+export const SEPOLIA_CHAIN_ID = 11155111;

@@ -277,6 +277,7 @@ model ProposalRecord {
   title           String
   excerpt         String
   description     String
+  descriptionHash String?
   category        ProposalCategory
   proposerAddress String
   proposerLabel   String
@@ -285,6 +286,10 @@ model ProposalRecord {
   governorAddress String
   registryAddress String?
   governorTxHash  String?
+
+  targets         Json?
+  values          Json?
+  calldatas       Json?
 
   votingStartsAt  DateTime?
   votingEndsAt    DateTime?

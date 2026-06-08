@@ -1,182 +1,251 @@
 import { getProposalById } from "@/lib/services/proposals";
 import type {
-  MockVoteSubmissionInput,
-  MockVoteSubmissionResult,
-  ProposalActionDisabledReason,
   ProposalActionState,
-  ProposalStatus,
+  ProposalDetail,
   VoteActionState,
   VoteEligibility,
 } from "@/types/governance";
 
-function buildVoteEligibility(status: ProposalStatus): VoteEligibility {
-  switch (status) {
-    case "active":
-      return {
-        canVote: true,
-        title: "Voting is open",
-        description: "You can cast a vote on this proposal right now.",
-      };
+function buildVoteEligibility(proposal: ProposalDetail): VoteEligibility {
+  const governance = proposal.governance;
 
-    case "draft":
-      return {
-        canVote: false,
-        reason: "draft",
-        title: "Proposal is still a draft",
-        description: "Voting is unavailable until the proposal becomes active.",
-      };
-
-    case "succeeded":
-      return {
-        canVote: false,
-        reason: "proposal_closed",
-        title: "Voting has ended",
-        description:
-          "This proposal already passed and can no longer receive votes.",
-      };
-
-    case "queued":
-      return {
-        canVote: false,
-        reason: "execution_only",
-        title: "Proposal queued",
-        description:
-          "Voting has ended and the proposal is now in the execution flow.",
-      };
-
-    case "executed":
-      return {
-        canVote: false,
-        reason: "executed",
-        title: "Proposal executed",
-        description:
-          "This proposal has already been executed and cannot receive votes.",
-      };
-
-    case "defeated":
-      return {
-        canVote: false,
-        reason: "proposal_closed",
-        title: "Proposal defeated",
-        description: "Voting has ended and this proposal did not pass.",
-      };
-
-    case "canceled":
-      return {
-        canVote: false,
-        reason: "canceled",
-        title: "Proposal canceled",
-        description: "This proposal was canceled and cannot receive votes.",
-      };
-
-    default:
-      return {
-        canVote: false,
-        reason: "proposal_not_active",
-        title: "Voting unavailable",
-        description: "This proposal is not currently in a votable state.",
-      };
+  if (!governance) {
+    return {
+      canVote: false,
+      reason: "wallet_required",
+      title: "Wallet required",
+      description: "Connect a governance wallet to check voting eligibility.",
+    };
   }
+
+  if (proposal.status === "pending") {
+    return {
+      canVote: false,
+      reason: "proposal_not_started",
+      title: "Voting has not started",
+      description: "This proposal is waiting for its voting window to begin.",
+    };
+  }
+
+  if (proposal.status === "draft") {
+    return {
+      canVote: false,
+      reason: "draft",
+      title: "Proposal is still a draft",
+      description: "Voting is unavailable until the proposal becomes active.",
+    };
+  }
+
+  if (proposal.status === "queued") {
+    return {
+      canVote: false,
+      reason: "execution_only",
+      title: "Proposal queued",
+      description:
+        "Voting has ended and the proposal is now in the execution flow.",
+    };
+  }
+
+  if (proposal.status === "executed") {
+    return {
+      canVote: false,
+      reason: "executed",
+      title: "Proposal executed",
+      description:
+        "This proposal has already been executed and cannot receive votes.",
+    };
+  }
+
+  if (proposal.status === "canceled") {
+    return {
+      canVote: false,
+      reason: "canceled",
+      title: "Proposal canceled",
+      description: "This proposal was canceled and cannot receive votes.",
+    };
+  }
+
+  if (proposal.status === "defeated" || proposal.status === "succeeded") {
+    return {
+      canVote: false,
+      reason: "proposal_closed",
+      title: "Voting closed",
+      description: "Voting is no longer open for this proposal.",
+    };
+  }
+
+  if (proposal.status !== "active") {
+    return {
+      canVote: false,
+      reason: "proposal_not_active",
+      title: "Voting unavailable",
+      description: "This proposal is not currently in a votable state.",
+    };
+  }
+
+  if (governance.hasVoted) {
+    return {
+      canVote: false,
+      reason: "already_voted",
+      title: "Vote already submitted",
+      description: "Your vote has already been recorded for this proposal.",
+    };
+  }
+
+  if (governance.needsDelegation) {
+    return {
+      canVote: false,
+      reason: "delegated_away",
+      title: "Delegation required",
+      description:
+        "Delegate voting power to yourself before voting on this proposal.",
+    };
+  }
+  if (BigInt(governance.userVotingPower) <= BigInt(0)) {
+    return {
+      canVote: false,
+      reason: "no_voting_power",
+      title: "No voting power",
+      description: "You did not have voting power at this proposal's snapshot.",
+    };
+  }
+
+  return {
+    canVote: true,
+    title: "Voting is open",
+    description: "You can cast a vote on this proposal right now.",
+  };
 }
 
-function buildVoteActionState(status: ProposalStatus): VoteActionState {
-  switch (status) {
-    case "active":
-      return {
-        status: "review",
-        submitLabel: "Cast vote",
-      };
+function buildVoteActionState(proposal: ProposalDetail): VoteActionState {
+  const governance = proposal.governance;
 
-    case "executed":
-      return {
-        status: "success",
-        submitLabel: "Executed",
-        feedbackTitle: "Proposal executed",
-        feedbackMessage: "This proposal has already been executed.",
-      };
-
-    case "queued":
-      return {
-        status: "idle",
-        submitLabel: "Voting closed",
-        feedbackTitle: "Proposal queued",
-        feedbackMessage: "Voting has ended and the proposal is queued.",
-      };
-
-    case "succeeded":
-      return {
-        status: "idle",
-        submitLabel: "Voting closed",
-        feedbackTitle: "Voting complete",
-        feedbackMessage:
-          "This proposal passed and is awaiting the next governance step.",
-      };
-
-    case "defeated":
-      return {
-        status: "idle",
-        submitLabel: "Voting closed",
-        feedbackTitle: "Proposal defeated",
-        feedbackMessage: "This proposal did not pass.",
-      };
-
-    case "canceled":
-      return {
-        status: "idle",
-        submitLabel: "Voting closed",
-        feedbackTitle: "Proposal canceled",
-        feedbackMessage: "This proposal was canceled.",
-      };
-
-    case "draft":
-    default:
-      return {
-        status: "idle",
-        submitLabel: "Voting unavailable",
-        feedbackTitle: "Voting unavailable",
-        feedbackMessage: "This proposal is not open for voting.",
-      };
+  if (governance?.hasVoted) {
+    return {
+      status: "success",
+      submitLabel: "Voted",
+      feedbackTitle: "Vote recorded",
+      feedbackMessage: "Your vote has already been recorded onchain.",
+    };
   }
+
+  if (proposal.status === "active") {
+    return {
+      status: "review",
+      submitLabel: "Cast vote",
+      feedbackTitle: "Review your vote",
+      feedbackMessage:
+        "Choose For, Against, or Abstain and confirm in your wallet.",
+    };
+  }
+
+  if (proposal.status === "executed") {
+    return {
+      status: "success",
+      submitLabel: "Executed",
+      feedbackTitle: "Proposal executed",
+      feedbackMessage: "This proposal has already been executed.",
+    };
+  }
+
+  if (proposal.status === "queued") {
+    return {
+      status: "idle",
+      submitLabel: "Voting closed",
+      feedbackTitle: "Proposal queued",
+      feedbackMessage: "Voting has ended and the proposal is queued.",
+    };
+  }
+
+  if (proposal.status === "succeeded") {
+    return {
+      status: "idle",
+      submitLabel: "Voting closed",
+      feedbackTitle: "Voting complete",
+      feedbackMessage:
+        "This proposal passed and is awaiting the next governance step.",
+    };
+  }
+
+  if (proposal.status === "defeated") {
+    return {
+      status: "idle",
+      submitLabel: "Voting closed",
+      feedbackTitle: "Proposal defeated",
+      feedbackMessage: "This proposal did not pass.",
+    };
+  }
+
+  if (proposal.status === "canceled") {
+    return {
+      status: "idle",
+      submitLabel: "Voting closed",
+      feedbackTitle: "Proposal canceled",
+      feedbackMessage: "This proposal was canceled.",
+    };
+  }
+
+  if (proposal.status === "pending") {
+    return {
+      status: "idle",
+      submitLabel: "Voting not started",
+      feedbackTitle: "Voting has not started",
+      feedbackMessage: "This proposal is waiting for its voting window.",
+    };
+  }
+
+  return {
+    status: "idle",
+    submitLabel: "Voting unavailable",
+    feedbackTitle: "Voting unavailable",
+    feedbackMessage: "This proposal is not open for voting.",
+  };
 }
 
-function buildActionSummary(status: ProposalStatus): string {
-  switch (status) {
-    case "active":
-      return "Voting is currently open for this proposal.";
-    case "succeeded":
-      return "Voting has ended and the proposal passed.";
-    case "queued":
-      return "The proposal is queued and waiting for execution.";
-    case "executed":
-      return "The proposal has already been executed.";
-    case "defeated":
-      return "Voting has ended and the proposal did not pass.";
-    case "canceled":
-      return "The proposal was canceled.";
-    case "draft":
-    default:
-      return "This proposal is not currently open for voting.";
-  }
-}
+function buildActionSummary(proposal: ProposalDetail): string {
+  const governance = proposal.governance;
 
-function getDisabledReasonForStatus(
-  status: ProposalStatus,
-): ProposalActionDisabledReason | undefined {
-  switch (status) {
-    case "draft":
-      return "draft";
-    case "queued":
-      return "execution_only";
-    case "executed":
-      return "executed";
-    case "canceled":
-      return "canceled";
-    case "succeeded":
-    case "defeated":
-      return "proposal_closed";
-    default:
-      return undefined;
+  if (proposal.status === "pending") {
+    return "Voting has not started for this proposal yet.";
   }
+
+  if (proposal.status === "active" && governance?.hasVoted) {
+    return "Your vote has already been recorded for this active proposal.";
+  }
+
+  if (proposal.status === "active" && governance?.canVote) {
+    return "Voting is currently open for this proposal.";
+  }
+
+  if (proposal.status === "active" && governance?.needsDelegation) {
+    return "Voting is open, but you need to self-delegate before voting.";
+  }
+
+  if (proposal.status === "active") {
+    return "Voting is open, but your wallet is not currently eligible to vote.";
+  }
+
+  if (proposal.status === "succeeded") {
+    return "Voting has ended and the proposal passed.";
+  }
+
+  if (proposal.status === "queued") {
+    return "The proposal is queued and waiting for execution.";
+  }
+
+  if (proposal.status === "executed") {
+    return "The proposal has already been executed.";
+  }
+
+  if (proposal.status === "defeated") {
+    return "Voting has ended and the proposal did not pass.";
+  }
+
+  if (proposal.status === "canceled") {
+    return "The proposal was canceled.";
+  }
+
+  return "This proposal is not currently open for voting.";
 }
 
 export async function getProposalActionState(
@@ -191,87 +260,8 @@ export async function getProposalActionState(
   return {
     proposalId: proposal.id,
     proposalStatus: proposal.status,
-    summary: buildActionSummary(proposal.status),
-    eligibility: buildVoteEligibility(proposal.status),
-    vote: buildVoteActionState(proposal.status),
-  };
-}
-
-export async function submitMockVote(
-  input: MockVoteSubmissionInput,
-): Promise<MockVoteSubmissionResult> {
-  const proposal = await getProposalById(input.proposalId);
-
-  if (!proposal) {
-    return {
-      ok: false,
-      proposalId: input.proposalId,
-      vote: {
-        status: "error",
-        selectedSupport: input.support,
-        submitLabel: "Proposal unavailable",
-        feedbackTitle: "Proposal not found",
-        feedbackMessage:
-          "The requested proposal could not be found in the current proposal store.",
-      },
-      eligibility: {
-        canVote: false,
-        reason: "proposal_not_active",
-        title: "Proposal unavailable",
-        description:
-          "The requested proposal could not be found in the current proposal store.",
-      },
-      errorMessage:
-        "The requested proposal could not be found in the current proposal store.",
-    };
-  }
-
-  if (proposal.status !== "active") {
-    const reason =
-      getDisabledReasonForStatus(proposal.status) ?? "proposal_not_active";
-
-    return {
-      ok: false,
-      proposalId: proposal.id,
-      support: input.support,
-      vote: {
-        status: "error",
-        selectedSupport: input.support,
-        submitLabel: "Voting unavailable",
-        feedbackTitle: "Voting is closed",
-        feedbackMessage:
-          "Votes can only be submitted while a proposal is active.",
-      },
-      eligibility: {
-        canVote: false,
-        reason,
-        title: "Voting unavailable",
-        description:
-          "Votes can only be submitted while the proposal is active.",
-      },
-      errorMessage: "Votes can only be submitted while the proposal is active.",
-    };
-  }
-
-  return {
-    ok: false,
-    proposalId: proposal.id,
-    support: input.support,
-    vote: {
-      status: "error",
-      selectedSupport: input.support,
-      submitLabel: "Wallet vote not connected",
-      feedbackTitle: "Voting not wired yet",
-      feedbackMessage:
-        "This proposal is active, but wallet signing and onchain vote submission are not implemented yet.",
-    },
-    eligibility: {
-      canVote: true,
-      title: "Vote path not connected",
-      description:
-        "The proposal is active, but wallet signing and onchain vote submission are not implemented yet.",
-    },
-    errorMessage:
-      "The proposal is active, but wallet signing and onchain vote submission are not implemented yet.",
+    summary: buildActionSummary(proposal),
+    eligibility: buildVoteEligibility(proposal),
+    vote: buildVoteActionState(proposal),
   };
 }

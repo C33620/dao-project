@@ -1,5 +1,6 @@
 export type ProposalStatus =
   | "draft"
+  | "pending"
   | "active"
   | "succeeded"
   | "queued"
@@ -65,6 +66,8 @@ export type ProposalSummary = {
   votingEndsAt?: string;
   queuedAt?: string;
   executableAt?: string;
+  actionsLabel?: string;
+  hasVoted: boolean;
 };
 
 export type ProposalDetail = ProposalSummary & {
@@ -74,6 +77,17 @@ export type ProposalDetail = ProposalSummary & {
   votes: ProposalVoteTotals;
   timeline: ProposalTimelineItem[];
   actionsLabel: string;
+  governance?: ProposalGovernanceFlags;
+};
+
+export type ProposalGovernanceFlags = {
+  canVote: boolean;
+  hasVoted: boolean;
+  canQueue: boolean;
+  canExecute: boolean;
+  needsDelegation: boolean;
+  userVotingPower: string;
+  snapshotBlock?: string;
 };
 
 export type GovernanceActivityType =

@@ -23,7 +23,7 @@ export default async function ProposalsPage() {
         <ProposalList
           proposals={proposals}
           emptyTitle="No active proposals right now"
-          emptyDescription="When a new item is ready for review, it will appear here."
+          emptyDescription="When the governor opens a voting window, proposals will appear here."
         />
       </div>
     </PageShell>

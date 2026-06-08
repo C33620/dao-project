@@ -16,59 +16,35 @@ import {
   decodeErrorResult,
   encodeFunctionData,
   http,
-  keccak256,
-  toHex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { sepolia } from "viem/chains";
 
 export const runtime = "nodejs";
 
-const errorSignatures = [
-  "ECDSAInvalidSignature()",
-  "EthTransferFailed()",
-  "InsufficientEthBalance()",
-  "InsufficientTokenBalance()",
-  "InvalidRelayer()",
-  "InvalidSignature()",
-  "SignatureExpired()",
-  "ZeroAddress()",
-];
-
-for (const error of errorSignatures) {
-  const selector = keccak256(toHex(error)).slice(0, 10);
-  console.log("error selector", error, selector);
-}
-
 type UnknownRecord = Record<string, unknown>;
-
-type WalkableError = {
-  walk?: () => unknown;
-};
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
 }
 
-function findHexString(
-  value: unknown,
-  seen = new Set<unknown>(),
-): `0x${string}` | undefined {
-  if (typeof value === "string" && value.startsWith("0x")) {
-    return value as `0x${string}`;
-  }
+function extractRevertData(err: unknown): `0x${string}` | undefined {
+  let current: unknown = err;
+  const seen = new Set<unknown>();
 
-  if (!isRecord(value) || seen.has(value)) {
-    return undefined;
-  }
+  while (isRecord(current) && !seen.has(current)) {
+    seen.add(current);
 
-  seen.add(value);
-
-  for (const nested of Object.values(value)) {
-    const found = findHexString(nested, seen);
-    if (found) {
-      return found;
+    const data = current["data"];
+    if (
+      typeof data === "string" &&
+      data.startsWith("0x") &&
+      data.length >= 10
+    ) {
+      return data as `0x${string}`;
     }
+
+    current = current["cause"];
   }
 
   return undefined;
@@ -180,6 +156,10 @@ export async function POST(request: Request) {
 
     await markExecutionQueued(attempt.attemptKey);
 
+    console.log("execute relayer from key", account.address);
+    console.log("attempt.relayerAddress", attempt.relayerAddress);
+    console.log("attempt.closeIntentRelayer", attempt.closeIntentRelayer);
+
     const closeIntentDeadlineSeconds = BigInt(
       Math.floor(attempt.closeIntentDeadline.getTime() / 1000),
     );
@@ -216,17 +196,6 @@ export async function POST(request: Request) {
       authorizationR: attempt.authorizationR,
       authorizationS: attempt.authorizationS,
     });
-
-    try {
-      const preflight = await publicClient.call({
-        account: account.address,
-        to: attempt.walletAddress as `0x${string}`,
-        data,
-      });
-      console.log("preflight call result", preflight);
-    } catch (preflightErr) {
-      console.error("preflight call failed", preflightErr);
-    }
 
     const txHash = await walletClient.sendTransaction({
       account,
@@ -286,17 +255,6 @@ export async function POST(request: Request) {
     let message = err instanceof Error ? err.message : "Unknown error";
 
     console.error("close execute failed", err);
-
-    if (isRecord(err) && "walk" in err) {
-      const walkable = err as WalkableError;
-      try {
-        const walked = walkable.walk?.();
-        console.error("walked error", walked);
-      } catch (walkErr) {
-        console.error("walk failed", walkErr);
-      }
-    }
-
     console.error("error cause", isRecord(err) ? err["cause"] : undefined);
     console.error(
       "error cause cause",
@@ -305,7 +263,7 @@ export async function POST(request: Request) {
         : undefined,
     );
 
-    const revertData = findHexString(err);
+    const revertData = extractRevertData(err);
     console.error("revertData", revertData);
 
     if (revertData) {

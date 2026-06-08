@@ -1,5 +1,15 @@
+import "server-only";
+
+import governanceTokenAbi from "@/abi/GovernanceToken.json";
+import governorAbi from "@/abi/MyGovernor.json";
+import { getCurrentUser } from "@/lib/auth";
+import { getBlockchainClient } from "@/lib/blockchain/client";
 import { db } from "@/lib/db";
 import { getProposalCategoryLabel } from "@/lib/governance/create-proposal";
+import {
+  GOVERNANCE_TOKEN_ADDRESS,
+  MY_GOVERNOR_ADDRESS,
+} from "@/lib/web3/contracts";
 import type {
   DashboardSummary,
   GovernanceActivityItem,
@@ -10,6 +20,7 @@ import type {
   ProtocolStatusItem,
   StatusTone,
 } from "@/types/governance";
+import type { Address, Hex } from "viem";
 
 export type ProposalTimelineEvent = {
   id: string;
@@ -18,26 +29,82 @@ export type ProposalTimelineEvent = {
   timestamp: string;
 };
 
-type ProposalLifecycleFields = {
-  votingStartsAt: Date | null;
-  votingEndsAt: Date | null;
-  queuedAt: Date | null;
-  executableAt: Date | null;
-  executedAt: Date | null;
-  canceledAt: Date | null;
-  defeatedAt: Date | null;
+type GovernorState =
+  | "pending"
+  | "active"
+  | "canceled"
+  | "defeated"
+  | "succeeded"
+  | "queued"
+  | "expired"
+  | "executed";
+
+type StoredProposalRecord = Awaited<
+  ReturnType<typeof getStoredProposalRecords>
+>[number];
+
+type EnrichedProposal = {
+  summary: ProposalSummary;
+  detailVotes: ProposalDetail["votes"];
+  timeline: ProposalDetail["timeline"];
+  actionsLabel: string;
+  descriptionParagraphs: string[];
+  flags: {
+    canVote: boolean;
+    hasVoted: boolean;
+    canQueue: boolean;
+    canExecute: boolean;
+    needsDelegation: boolean;
+    userVotingPower: bigint;
+    snapshotBlock: bigint | null;
+  };
 };
 
-function formatIso(value: Date | string | null | undefined) {
-  if (!value) {
-    return undefined;
-  }
+type GovernanceClockMode = "timestamp" | "blocknumber" | "unknown";
 
-  return value instanceof Date ? value.toISOString() : value;
+function mapGovernorState(value: number): GovernorState {
+  switch (value) {
+    case 0:
+      return "pending";
+    case 1:
+      return "active";
+    case 2:
+      return "canceled";
+    case 3:
+      return "defeated";
+    case 4:
+      return "succeeded";
+    case 5:
+      return "queued";
+    case 6:
+      return "expired";
+    case 7:
+      return "executed";
+    default:
+      return "pending";
+  }
 }
 
-function toMillis(value: Date | null): number | undefined {
-  return value ? value.getTime() : undefined;
+function governorStateToProposalStatus(state: GovernorState): ProposalStatus {
+  switch (state) {
+    case "pending":
+      return "pending";
+    case "active":
+      return "active";
+    case "queued":
+      return "queued";
+    case "succeeded":
+      return "succeeded";
+    case "executed":
+      return "executed";
+    case "defeated":
+    case "expired":
+      return "defeated";
+    case "canceled":
+      return "canceled";
+    default:
+      return "draft";
+  }
 }
 
 function mapStatus(status: ProposalStatus): {
@@ -45,6 +112,8 @@ function mapStatus(status: ProposalStatus): {
   statusTone: StatusTone;
 } {
   switch (status) {
+    case "pending":
+      return { statusLabel: "Waiting", statusTone: "pending" };
     case "active":
       return { statusLabel: "Active", statusTone: "info" };
     case "queued":
@@ -74,8 +143,10 @@ async function getStoredProposalRecords() {
       title: true,
       excerpt: true,
       description: true,
+      descriptionHash: true,
       category: true,
       proposerLabel: true,
+      proposerAddress: true,
       createdAt: true,
       updatedAt: true,
       votingStartsAt: true,
@@ -86,80 +157,275 @@ async function getStoredProposalRecords() {
       canceledAt: true,
       defeatedAt: true,
       governorTxHash: true,
+      governorAddress: true,
+      targets: true,
+      values: true,
+      calldatas: true,
     },
   });
 }
 
-type StoredProposalRecord = Awaited<
-  ReturnType<typeof getStoredProposalRecords>
->[number];
+async function getCurrentUserWalletAddress() {
+  const user = await getCurrentUser();
 
-function getLifecycleFields(record: {
-  votingStartsAt: Date | null;
-  votingEndsAt: Date | null;
-  queuedAt: Date | null;
-  executableAt: Date | null;
-  executedAt: Date | null;
-  canceledAt: Date | null;
-  defeatedAt: Date | null;
-}): ProposalLifecycleFields {
-  return {
-    votingStartsAt: record.votingStartsAt,
-    votingEndsAt: record.votingEndsAt,
-    queuedAt: record.queuedAt,
-    executableAt: record.executableAt,
-    executedAt: record.executedAt,
-    canceledAt: record.canceledAt,
-    defeatedAt: record.defeatedAt,
-  };
+  if (!user) {
+    return null;
+  }
+
+  const fullUser = await db.user.findUnique({
+    where: { id: user.id },
+    select: {
+      walletAddress: true,
+    },
+  });
+
+  return fullUser?.walletAddress ?? null;
 }
 
-function inferStatusFromRecord(
-  record: ProposalLifecycleFields,
-): ProposalStatus {
-  const now = Date.now();
-  const votingStartsAt = toMillis(record.votingStartsAt);
-  const votingEndsAt = toMillis(record.votingEndsAt);
-  const executableAt = toMillis(record.executableAt);
+function formatReadableDate(value: Date | string) {
+  const date = typeof value === "string" ? new Date(value) : value;
 
-  if (record.executedAt) {
-    return "executed";
-  }
-
-  if (record.canceledAt) {
-    return "canceled";
-  }
-
-  if (record.defeatedAt) {
-    return "defeated";
-  }
-
-  if (record.queuedAt || (executableAt !== undefined && executableAt <= now)) {
-    return "queued";
-  }
-
-  if (
-    votingStartsAt !== undefined &&
-    votingEndsAt !== undefined &&
-    votingStartsAt <= now &&
-    votingEndsAt >= now
-  ) {
-    return "active";
-  }
-
-  if (votingEndsAt !== undefined && votingEndsAt < now) {
-    return "succeeded";
-  }
-
-  return "draft";
+  return new Intl.DateTimeFormat("en", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
 }
 
-function toSummary(record: StoredProposalRecord): ProposalSummary {
-  const lifecycle = getLifecycleFields(record);
-  const status = inferStatusFromRecord(lifecycle);
+function detectClockMode(
+  clockModeValue: string | null | undefined,
+): GovernanceClockMode {
+  if (!clockModeValue) {
+    return "unknown";
+  }
+
+  const normalized = clockModeValue.toLowerCase();
+
+  if (normalized.includes("mode=timestamp")) {
+    return "timestamp";
+  }
+
+  if (normalized.includes("mode=blocknumber")) {
+    return "blocknumber";
+  }
+
+  return "unknown";
+}
+
+function formatVotingStart(
+  timepoint: bigint | null,
+  clockMode: GovernanceClockMode,
+): string | undefined {
+  if (timepoint === null || timepoint <= BigInt(0)) {
+    return undefined;
+  }
+
+  if (clockMode === "timestamp") {
+    return formatReadableDate(new Date(Number(timepoint) * 1000));
+  }
+
+  return undefined;
+}
+
+function formatVotingEnd(
+  timepoint: bigint | null,
+  clockMode: GovernanceClockMode,
+): string | undefined {
+  if (timepoint === null || timepoint <= BigInt(0)) {
+    return undefined;
+  }
+
+  if (clockMode === "timestamp") {
+    return formatReadableDate(new Date(Number(timepoint) * 1000));
+  }
+
+  return undefined;
+}
+
+function formatEtaToDisplay(secondsValue: bigint | null) {
+  if (secondsValue === null || secondsValue <= BigInt(0)) {
+    return undefined;
+  }
+
+  return formatReadableDate(new Date(Number(secondsValue) * 1000));
+}
+
+function safeJsonStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+
+  if (!value.every((item) => typeof item === "string")) {
+    return null;
+  }
+
+  return value;
+}
+
+async function enrichProposal(
+  record: StoredProposalRecord,
+  currentUserWallet: string | null,
+): Promise<EnrichedProposal> {
+  const client = getBlockchainClient();
+  const proposalId = BigInt(record.proposalId);
+
+  const [
+    rawState,
+    snapshot,
+    deadline,
+    eta,
+    needsQueuing,
+    voteTotals,
+    clockModeRaw,
+  ] = await Promise.all([
+    client.readContract({
+      address: MY_GOVERNOR_ADDRESS,
+      abi: governorAbi,
+      functionName: "state",
+      args: [proposalId],
+    }) as Promise<number>,
+    client.readContract({
+      address: MY_GOVERNOR_ADDRESS,
+      abi: governorAbi,
+      functionName: "proposalSnapshot",
+      args: [proposalId],
+    }) as Promise<bigint>,
+    client.readContract({
+      address: MY_GOVERNOR_ADDRESS,
+      abi: governorAbi,
+      functionName: "proposalDeadline",
+      args: [proposalId],
+    }) as Promise<bigint>,
+    client.readContract({
+      address: MY_GOVERNOR_ADDRESS,
+      abi: governorAbi,
+      functionName: "proposalEta",
+      args: [proposalId],
+    }) as Promise<bigint>,
+    client.readContract({
+      address: MY_GOVERNOR_ADDRESS,
+      abi: governorAbi,
+      functionName: "proposalNeedsQueuing",
+      args: [proposalId],
+    }) as Promise<boolean>,
+    client.readContract({
+      address: MY_GOVERNOR_ADDRESS,
+      abi: governorAbi,
+      functionName: "proposalVotes",
+      args: [proposalId],
+    }) as Promise<[bigint, bigint, bigint]>,
+    client.readContract({
+      address: MY_GOVERNOR_ADDRESS,
+      abi: governorAbi,
+      functionName: "CLOCK_MODE",
+    }) as Promise<string>,
+  ]);
+
+  const clockMode = detectClockMode(clockModeRaw);
+  const governorState = mapGovernorState(rawState);
+  const status = governorStateToProposalStatus(governorState);
   const statusView = mapStatus(status);
 
-  return {
+  let hasVoted = false;
+  let userVotingPower = BigInt(0);
+  let needsDelegation = false;
+
+  if (currentUserWallet) {
+    const voter = currentUserWallet as Address;
+
+    const [hasUserVoted, delegatee, currentVotes, balance, tokenClock] =
+      await Promise.all([
+        client.readContract({
+          address: MY_GOVERNOR_ADDRESS,
+          abi: governorAbi,
+          functionName: "hasVoted",
+          args: [proposalId, voter],
+        }) as Promise<boolean>,
+        client.readContract({
+          address: GOVERNANCE_TOKEN_ADDRESS,
+          abi: governanceTokenAbi,
+          functionName: "delegates",
+          args: [voter],
+        }) as Promise<Address>,
+        client.readContract({
+          address: GOVERNANCE_TOKEN_ADDRESS,
+          abi: governanceTokenAbi,
+          functionName: "getVotes",
+          args: [voter],
+        }) as Promise<bigint>,
+        client.readContract({
+          address: GOVERNANCE_TOKEN_ADDRESS,
+          abi: governanceTokenAbi,
+          functionName: "balanceOf",
+          args: [voter],
+        }) as Promise<bigint>,
+        client.readContract({
+          address: GOVERNANCE_TOKEN_ADDRESS,
+          abi: governanceTokenAbi,
+          functionName: "clock",
+        }) as Promise<bigint>,
+      ]);
+
+    let snapshotVotes = BigInt(0);
+
+    if (snapshot <= tokenClock) {
+      try {
+        snapshotVotes = (await client.readContract({
+          address: GOVERNANCE_TOKEN_ADDRESS,
+          abi: governanceTokenAbi,
+          functionName: "getPastVotes",
+          args: [voter, snapshot],
+        })) as bigint;
+      } catch (error) {
+        console.error("GET_PAST_VOTES_READ_ERROR", error);
+        snapshotVotes = BigInt(0);
+      }
+    }
+
+    hasVoted = hasUserVoted;
+    userVotingPower = snapshotVotes;
+    needsDelegation =
+      balance > BigInt(0) &&
+      (delegatee.toLowerCase() !== voter.toLowerCase() ||
+        currentVotes === BigInt(0));
+  }
+
+  const canVote =
+    governorState === "active" && !hasVoted && userVotingPower > BigInt(0);
+
+  const canQueue = governorState === "succeeded" && needsQueuing;
+
+  const nowSeconds = BigInt(Math.floor(Date.now() / 1000));
+  const canExecute =
+    governorState === "queued" && eta > BigInt(0) && eta <= nowSeconds;
+
+  const votingStartsAt = record.votingStartsAt
+    ? formatReadableDate(record.votingStartsAt)
+    : formatVotingStart(snapshot, clockMode);
+
+  const votingEndsAt = record.votingEndsAt
+    ? formatReadableDate(record.votingEndsAt)
+    : formatVotingEnd(deadline, clockMode);
+
+  const executableAt = record.executableAt
+    ? formatReadableDate(record.executableAt)
+    : formatEtaToDisplay(eta);
+
+  const queuedAt = record.queuedAt
+    ? formatReadableDate(record.queuedAt)
+    : undefined;
+
+  const actionsLabel = canVote
+    ? "Vote available"
+    : canQueue
+    ? "Ready to queue"
+    : canExecute
+    ? "Ready to execute"
+    : statusView.statusLabel;
+
+  const summary: ProposalSummary = {
     id: record.proposalId,
     slug: record.proposalId,
     title: record.title,
@@ -168,70 +434,117 @@ function toSummary(record: StoredProposalRecord): ProposalSummary {
     statusLabel: statusView.statusLabel,
     statusTone: statusView.statusTone,
     category: record.category,
-    proposer: record.proposerLabel,
-    createdAt: record.createdAt.toISOString(),
-    votingStartsAt: formatIso(record.votingStartsAt),
-    votingEndsAt: formatIso(record.votingEndsAt),
-    queuedAt: formatIso(record.queuedAt),
-    executableAt: formatIso(record.executableAt),
+    proposer: record.proposerLabel || record.proposerAddress,
+    createdAt: formatReadableDate(record.createdAt),
+    votingStartsAt,
+    votingEndsAt,
+    queuedAt,
+    executableAt,
+    actionsLabel,
+    hasVoted,
   };
-}
 
-function buildTimeline(proposal: ProposalSummary): ProposalDetail["timeline"] {
-  const items: ProposalDetail["timeline"] = [
+  const timeline: ProposalDetail["timeline"] = [
     {
       stage: "drafted",
       label: "Proposal created",
-      date: proposal.createdAt,
+      date: formatReadableDate(record.createdAt),
       complete: true,
-      current: proposal.status === "draft",
+      current: governorState === "pending",
     },
   ];
 
-  if (proposal.votingStartsAt) {
-    items.push({
+  if (votingStartsAt) {
+    timeline.push({
       stage: "active",
-      label: "Voting starts",
-      date: proposal.votingStartsAt,
-      complete: proposal.status !== "draft",
-      current: proposal.status === "active",
+      label: `Voting starts: ${votingStartsAt}`,
+      date: votingStartsAt,
+      complete: governorState !== "pending",
+      current: governorState === "active",
     });
   }
 
-  if (proposal.votingEndsAt) {
-    items.push({
+  if (votingEndsAt) {
+    timeline.push({
       stage: "succeeded",
-      label: "Voting ends",
-      date: proposal.votingEndsAt,
-      complete:
-        proposal.status === "succeeded" ||
-        proposal.status === "queued" ||
-        proposal.status === "executed",
-      current: proposal.status === "succeeded",
+      label: `Voting ends: ${votingEndsAt}`,
+      date: votingEndsAt,
+      complete: [
+        "succeeded",
+        "queued",
+        "executed",
+        "defeated",
+        "canceled",
+        "expired",
+      ].includes(governorState),
+      current: governorState === "succeeded",
     });
   }
 
-  if (proposal.queuedAt) {
-    items.push({
+  if (queuedAt) {
+    timeline.push({
       stage: "queued",
       label: "Queued",
-      date: proposal.queuedAt,
-      complete: proposal.status === "queued" || proposal.status === "executed",
-      current: proposal.status === "queued",
+      date: queuedAt,
+      complete: ["queued", "executed"].includes(governorState),
+      current: governorState === "queued" && !canExecute,
     });
   }
 
-  if (proposal.executableAt) {
-    items.push({
+  if (executableAt) {
+    timeline.push({
       stage: "executable",
       label: "Executable",
-      date: proposal.executableAt,
-      complete: proposal.status === "executed",
-      current: proposal.status === "queued",
+      date: executableAt,
+      complete: governorState === "executed",
+      current: canExecute,
     });
   }
 
-  return items;
+  return {
+    summary,
+    detailVotes: {
+      for: Number(voteTotals[1]),
+      against: Number(voteTotals[0]),
+      abstain: Number(voteTotals[2]),
+      quorum: 0,
+      totalParticipating: Number(voteTotals[0] + voteTotals[1] + voteTotals[2]),
+    },
+    timeline,
+    actionsLabel,
+    descriptionParagraphs: record.description
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean),
+    flags: {
+      canVote,
+      hasVoted,
+      canQueue,
+      canExecute,
+      needsDelegation,
+      userVotingPower,
+      snapshotBlock: snapshot,
+    },
+  };
+}
+
+function includeByFilter(
+  proposal: EnrichedProposal,
+  filter: ProposalFilterOption,
+) {
+  if (filter === "all") {
+    return true;
+  }
+
+  if (filter === "active") {
+    return proposal.summary.status === "active";
+  }
+
+  if (filter === "queued") {
+    return proposal.flags.canQueue || proposal.summary.status === "queued";
+  }
+
+  return proposal.summary.status === filter;
 }
 
 export async function getDashboardSummary(): Promise<DashboardSummary> {
@@ -243,14 +556,14 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
       address: "Available in account",
       delegateLabel: "Based on onchain delegation",
       votingPower: "Available on proposal detail",
-      participationRate: "Not available yet",
+      participationRate: "Onchain vote history",
       lastAction: "Recent activity shown below",
     },
     votingPower: {
-      totalVotingPower: "Not available yet",
-      delegatedPower: "Not available yet",
-      quorumReference: "Onchain governor threshold applies",
-      shareOfQuorum: "Not available yet",
+      totalVotingPower: "Onchain token supply",
+      delegatedPower: "Onchain delegated votes",
+      quorumReference: "Governor quorum at snapshot",
+      shareOfQuorum: "Calculated per proposal",
     },
     protocolStatus: await getProtocolStatus(),
     recentProposals,
@@ -261,13 +574,15 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
 export async function getProposals(
   filter: ProposalFilterOption = "all",
 ): Promise<ProposalSummary[]> {
-  const summaries = (await getStoredProposalRecords()).map(toSummary);
+  const records = await getStoredProposalRecords();
+  const currentUserWallet = await getCurrentUserWalletAddress();
+  const enriched = await Promise.all(
+    records.map((record) => enrichProposal(record, currentUserWallet)),
+  );
 
-  if (filter === "all") {
-    return summaries;
-  }
-
-  return summaries.filter((proposal) => proposal.status === filter);
+  return enriched
+    .filter((proposal) => includeByFilter(proposal, filter))
+    .map((proposal) => proposal.summary);
 }
 
 export async function getProposalById(
@@ -283,8 +598,10 @@ export async function getProposalById(
       title: true,
       excerpt: true,
       description: true,
+      descriptionHash: true,
       category: true,
       proposerLabel: true,
+      proposerAddress: true,
       createdAt: true,
       updatedAt: true,
       votingStartsAt: true,
@@ -295,6 +612,10 @@ export async function getProposalById(
       canceledAt: true,
       defeatedAt: true,
       governorTxHash: true,
+      governorAddress: true,
+      targets: true,
+      values: true,
+      calldatas: true,
     },
   });
 
@@ -302,25 +623,62 @@ export async function getProposalById(
     return null;
   }
 
-  const summary = toSummary(record);
+  const currentUserWallet = await getCurrentUserWalletAddress();
+  const enriched = await enrichProposal(record, currentUserWallet);
 
   return {
-    ...summary,
-    description: record.description
-      .split("\n")
-      .map((item) => item.trim())
-      .filter(Boolean),
+    ...enriched.summary,
+    description: enriched.descriptionParagraphs,
     tags: [getProposalCategoryLabel(record.category)],
-    contractSummary: "Governor proposal recorded with app metadata.",
-    votes: {
-      for: 0,
-      against: 0,
-      abstain: 0,
-      quorum: 0,
-      totalParticipating: 0,
+    contractSummary: "Governor lifecycle and vote status are read onchain.",
+    votes: enriched.detailVotes,
+    timeline: enriched.timeline,
+    actionsLabel: enriched.actionsLabel,
+    governance: {
+      canVote: enriched.flags.canVote,
+      hasVoted: enriched.flags.hasVoted,
+      canQueue: enriched.flags.canQueue,
+      canExecute: enriched.flags.canExecute,
+      needsDelegation: enriched.flags.needsDelegation,
+      userVotingPower: enriched.flags.userVotingPower.toString(),
+      snapshotBlock: enriched.flags.snapshotBlock?.toString(),
     },
-    timeline: buildTimeline(summary),
-    actionsLabel: summary.statusLabel,
+  };
+}
+
+export async function getProposalExecutionPayload(proposalId: string) {
+  const record = await db.proposalRecord.findUnique({
+    where: { proposalId },
+    select: {
+      proposalId: true,
+      description: true,
+      descriptionHash: true,
+      targets: true,
+      values: true,
+      calldatas: true,
+    },
+  });
+
+  if (!record) {
+    return null;
+  }
+
+  const targets = safeJsonStringArray(record.targets) as Address[] | null;
+  const values =
+    safeJsonStringArray(record.values)?.map((item) => BigInt(item)) ?? null;
+  const calldatas = safeJsonStringArray(record.calldatas) as Hex[] | null;
+
+  if (!targets || !values || !calldatas || !record.descriptionHash) {
+    return null;
+  }
+
+  return {
+    proposalId: record.proposalId,
+    description: record.description,
+    descriptionHash: record.descriptionHash as Hex,
+    targets,
+    values,
+    calldatas,
   };
 }
 
@@ -337,7 +695,7 @@ export async function getProposalTimeline(
     {
       id: `${proposal.id}-created`,
       title: "Proposal created",
-      description: `${proposal.proposer} submitted this proposal for review.`,
+      description: "A new anonymous proposal was submitted for review.",
       timestamp: proposal.createdAt,
     },
   ];
@@ -346,7 +704,8 @@ export async function getProposalTimeline(
     timeline.push({
       id: `${proposal.id}-voting-starts`,
       title: "Voting opens",
-      description: "The review and voting window becomes available.",
+      description:
+        "The voting window is now controlled by the onchain governor.",
       timestamp: proposal.votingStartsAt,
     });
   }
@@ -355,7 +714,7 @@ export async function getProposalTimeline(
     timeline.push({
       id: `${proposal.id}-voting-ends`,
       title: "Voting closes",
-      description: "The voting window ends and the result can be finalized.",
+      description: "The onchain voting period ends at this point.",
       timestamp: proposal.votingEndsAt,
     });
   }
@@ -364,7 +723,7 @@ export async function getProposalTimeline(
     timeline.push({
       id: `${proposal.id}-queued`,
       title: "Queued",
-      description: "The proposal is queued and waiting for execution.",
+      description: "The proposal is queued in the timelock path.",
       timestamp: proposal.queuedAt,
     });
   }
@@ -373,7 +732,8 @@ export async function getProposalTimeline(
     timeline.push({
       id: `${proposal.id}-executable`,
       title: "Executable",
-      description: "The proposal is ready to be executed.",
+      description:
+        "The proposal can be executed once the timelock delay has passed.",
       timestamp: proposal.executableAt,
     });
   }
@@ -384,19 +744,23 @@ export async function getProposalTimeline(
 export async function getRecentGovernanceActivity(): Promise<
   GovernanceActivityItem[]
 > {
-  const proposals = (await getStoredProposalRecords()).slice(0, 10);
+  const records = await getStoredProposalRecords();
+  const currentUserWallet = await getCurrentUserWalletAddress();
+  const enriched = await Promise.all(
+    records
+      .slice(0, 10)
+      .map((record) => enrichProposal(record, currentUserWallet)),
+  );
 
-  return proposals.map((record) => ({
-    id: `proposal-created-${record.proposalId}`,
+  return enriched.map((item) => ({
+    id: `proposal-${item.summary.id}-${item.summary.status}`,
     type: "proposal_created",
-    title: record.title,
-    description: `${record.proposerLabel} created a ${getProposalCategoryLabel(
-      record.category,
-    )} proposal.`,
-    occurredAt: record.createdAt.toISOString(),
-    relatedProposalId: record.proposalId,
-    relatedProposalCategory: record.category,
-    tone: "default",
+    title: item.summary.title,
+    description: item.summary.statusLabel,
+    occurredAt: item.summary.createdAt,
+    relatedProposalId: item.summary.id,
+    relatedProposalCategory: item.summary.category,
+    tone: item.summary.statusTone,
   }));
 }
 
@@ -410,7 +774,7 @@ export async function getProtocolStatus(): Promise<ProtocolStatusItem[]> {
         proposals.length === 1 ? "" : "s"
       }`,
       tone: proposals.length > 0 ? "success" : "default",
-      helpText: "Counts proposal metadata saved in the app companion layer.",
+      helpText: "Counts proposal metadata saved in the companion store.",
     },
     {
       label: "Category coverage",
@@ -421,11 +785,11 @@ export async function getProtocolStatus(): Promise<ProtocolStatusItem[]> {
       helpText: "Shows how many proposal categories are represented so far.",
     },
     {
-      label: "Metadata source",
-      value: "Prisma companion store",
-      tone: "pending",
+      label: "Lifecycle source",
+      value: "Onchain governor",
+      tone: "success",
       helpText:
-        "Governor state stays onchain while proposal metadata is stored offchain.",
+        "Proposal state, timing, and voting status are read from the governor contract.",
     },
   ];
 }

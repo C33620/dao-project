@@ -1,12 +1,21 @@
-export type BlockchainClient = {
-  chainId: number;
-  transport: "placeholder";
-};
+import { createPublicClient, http } from "viem";
+import { sepolia } from "viem/chains";
 
-export function getBlockchainClient(): BlockchainClient {
-  // TODO: add viem public/wallet clients for reads and writes.
-  return {
-    chainId: 1,
-    transport: "placeholder",
-  };
+let publicClientSingleton: ReturnType<typeof createPublicClient> | null = null;
+
+export function getBlockchainClient() {
+  if (!publicClientSingleton) {
+    const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL;
+
+    if (!rpcUrl) {
+      throw new Error("NEXT_PUBLIC_SEPOLIA_RPC_URL is not configured.");
+    }
+
+    publicClientSingleton = createPublicClient({
+      chain: sepolia,
+      transport: http(rpcUrl),
+    });
+  }
+
+  return publicClientSingleton;
 }

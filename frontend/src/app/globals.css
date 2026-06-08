@@ -2405,3 +2405,32 @@ main {
     height: 2rem;
   }
 }
+
+.proposal-vote-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(8px);
+}
+
+.proposal-vote-modal__surface {
+  width: min(720px, 100%);
+  max-height: 90vh;
+  overflow: auto;
+  border-radius: 20px;
+  padding: 24px;
+  background: var(--color-surface, #fff);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.2);
+}
+
+.proposal-vote-modal__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}

@@ -47,7 +47,7 @@ export default async function ProposalDetailPage({
       <section className="proposal-detail__meta-grid">
         <SectionCard
           title="Current status"
-          description="The latest stage, timing, and overall result for this proposal."
+          description="The latest onchain stage, timing, and overall result for this proposal."
         >
           <dl className="key-value-grid">
             <div>

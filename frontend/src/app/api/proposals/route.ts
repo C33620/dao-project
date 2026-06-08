@@ -13,9 +13,13 @@ type CreateProposalMetadataBody = {
   title: string;
   excerpt: string;
   description: string;
+  descriptionHash: string;
   category: ProposalCategory;
   proposerAddress: string;
   governorTxHash?: string | null;
+  targets: string[];
+  values: string[];
+  calldatas: string[];
 };
 
 function isProposalCategory(value: unknown): value is ProposalCategory {
@@ -27,13 +31,23 @@ function isProposalCategory(value: unknown): value is ProposalCategory {
   );
 }
 
+function isHexString(value: unknown) {
+  return typeof value === "string" && value.startsWith("0x");
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === "string")
+  );
+}
+
 export async function GET() {
   const proposals = await getProposals("all");
 
   return NextResponse.json({
     data: proposals,
     meta: {
-      source: "database",
+      source: "database+governor",
       count: proposals.length,
     },
   });
@@ -59,7 +73,11 @@ export async function POST(request: Request) {
       body.description.trim().length === 0 ||
       typeof body.proposerAddress !== "string" ||
       !body.proposerAddress.startsWith("0x") ||
-      !isProposalCategory(body.category)
+      !isProposalCategory(body.category) ||
+      !isHexString(body.descriptionHash) ||
+      !isStringArray(body.targets) ||
+      !isStringArray(body.values) ||
+      !isStringArray(body.calldatas)
     ) {
       return NextResponse.json(
         { error: "Invalid proposal metadata." },
@@ -89,6 +107,7 @@ export async function POST(request: Request) {
         title: body.title.trim(),
         excerpt: body.excerpt.trim(),
         description: body.description.trim(),
+        descriptionHash: body.descriptionHash.trim(),
         category: body.category,
         proposerAddress: body.proposerAddress,
         proposerLabel,
@@ -96,12 +115,16 @@ export async function POST(request: Request) {
         governorAddress: MY_GOVERNOR_ADDRESS,
         registryAddress: PROPOSAL_REGISTRY_ADDRESS,
         governorTxHash: body.governorTxHash?.trim() || null,
+        targets: body.targets,
+        values: body.values,
+        calldatas: body.calldatas,
       },
       create: {
         proposalId: body.proposalId.trim(),
         title: body.title.trim(),
         excerpt: body.excerpt.trim(),
         description: body.description.trim(),
+        descriptionHash: body.descriptionHash.trim(),
         category: body.category,
         proposerAddress: body.proposerAddress,
         proposerLabel,
@@ -109,6 +132,9 @@ export async function POST(request: Request) {
         governorAddress: MY_GOVERNOR_ADDRESS,
         registryAddress: PROPOSAL_REGISTRY_ADDRESS,
         governorTxHash: body.governorTxHash?.trim() || null,
+        targets: body.targets,
+        values: body.values,
+        calldatas: body.calldatas,
       },
     });
 
