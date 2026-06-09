@@ -2,7 +2,6 @@
 
 import governanceTokenAbi from "@/abi/GovernanceToken.json";
 import myGovernorAbi from "@/abi/MyGovernor.json";
-import { StatusBadge } from "@/components/ui/status-badge";
 import { getMagicClient } from "@/lib/auth/magic-client";
 import {
   GOVERNANCE_TOKEN_ADDRESS,
@@ -11,55 +10,15 @@ import {
 import type {
   ProposalActionState,
   ProposalDetail,
-  StatusTone,
   VoteSupport,
 } from "@/types/governance";
 import { BrowserProvider, Contract } from "ethers";
-import { useState, useTransition } from "react";
-
+import { useEffect, useMemo, useState, useTransition } from "react";
 type VoteActionCardProps = {
   proposal: ProposalDetail;
   initialActionState: ProposalActionState;
+  onVoteSuccess?: () => void;
 };
-
-const supportOptions: Array<{
-  value: VoteSupport;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "for",
-    label: "For",
-    description: "Support the proposal as currently written.",
-  },
-  {
-    value: "against",
-    label: "Against",
-    description: "Reject the proposal in its current form.",
-  },
-  {
-    value: "abstain",
-    label: "Abstain",
-    description: "Record participation without taking a side.",
-  },
-];
-
-function getToneFromStatus(
-  status: ProposalActionState["vote"]["status"],
-): StatusTone {
-  switch (status) {
-    case "success":
-      return "success";
-    case "error":
-      return "danger";
-    case "submitting":
-      return "pending";
-    case "review":
-      return "info";
-    default:
-      return "default";
-  }
-}
 
 function toGovernorSupport(support: VoteSupport): number {
   switch (support) {
@@ -118,29 +77,106 @@ async function enableVotingPowerOnchain(): Promise<void> {
   }
 }
 
+function parseDisplayDate(value?: string | null): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function formatTimeLeft(targetDate: Date | null, nowMs: number): string | null {
+  if (!targetDate) {
+    return null;
+  }
+
+  const diffMs = targetDate.getTime() - nowMs;
+
+  if (diffMs <= 0) {
+    return "Closed";
+  }
+
+  const totalSeconds = Math.floor(diffMs / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m left`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m left`;
+  }
+
+  return `${minutes}m left`;
+}
+
 export function VoteActionCard({
   proposal,
   initialActionState,
+  onVoteSuccess,
 }: VoteActionCardProps) {
   const [actionState, setActionState] = useState(initialActionState);
-  const [selectedSupport, setSelectedSupport] = useState<
-    VoteSupport | undefined
-  >(initialActionState.vote.selectedSupport);
+  const [selectedSupport] = useState<VoteSupport | undefined>(
+    initialActionState.vote.selectedSupport,
+  );
   const [isPending, startTransition] = useTransition();
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const needsDelegation = actionState.eligibility.reason === "delegated_away";
 
-  const buttonDisabled = needsDelegation
-    ? isPending
-    : isPending || !actionState.eligibility.canVote || !selectedSupport;
+  const hasAlreadyVoted =
+    actionState.eligibility.reason === "already_voted" ||
+    actionState.vote.status === "success" ||
+    actionState.vote.existingVote !== undefined;
+
+  const buttonDisabled =
+    isPending ||
+    hasAlreadyVoted ||
+    (!needsDelegation &&
+      (!actionState.eligibility.canVote || !selectedSupport));
 
   const buttonLabel = isPending
     ? needsDelegation
       ? "Enabling vote..."
       : "Submitting vote..."
+    : hasAlreadyVoted
+    ? "Voted"
     : needsDelegation
     ? "Enable vote"
-    : actionState.vote.submitLabel;
+    : "Submit vote";
+
+  const votingEndsDate = useMemo(
+    () => parseDisplayDate(proposal.votingEndsAt),
+    [proposal.votingEndsAt],
+  );
+
+  const votingClosesLabel = useMemo(() => {
+    if (proposal.status !== "active") {
+      return null;
+    }
+
+    return formatTimeLeft(votingEndsDate, nowMs);
+  }, [proposal.status, votingEndsDate, nowMs]);
+
+  useEffect(() => {
+    if (proposal.status !== "active" || !votingEndsDate) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 30_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [proposal.status, votingEndsDate]);
 
   function handleEnableVote() {
     setActionState((current) => ({
@@ -150,8 +186,7 @@ export function VoteActionCard({
         status: "submitting",
         submitLabel: "Enabling vote...",
         feedbackTitle: "Action needed in wallet",
-        feedbackMessage:
-          "Confirm self-delegation in your wallet to enable voting power.",
+        feedbackMessage: "Confirm self-delegation to enable voting power.",
       },
     }));
 
@@ -165,12 +200,12 @@ export function VoteActionCard({
             canVote: true,
             title: "Voting enabled",
             description:
-              "Your voting power has been enabled. You can now cast your vote.",
+              "Your voting power has been enabled. You can now submit your vote.",
           },
           vote: {
             ...current.vote,
             status: "review",
-            submitLabel: "Cast vote",
+            submitLabel: "Submit vote",
             feedbackTitle: "Voting enabled",
             feedbackMessage:
               "Your self-delegation was confirmed. Review your vote and submit.",
@@ -204,7 +239,7 @@ export function VoteActionCard({
           ...current.vote,
           status: "error",
           feedbackTitle: "Selection required",
-          feedbackMessage: "Choose For, Against, or Abstain before submitting.",
+          feedbackMessage: "Choose For or Against before submitting.",
         },
       }));
       return;
@@ -218,7 +253,7 @@ export function VoteActionCard({
         selectedSupport,
         submitLabel: "Submitting vote...",
         feedbackTitle: "Action needed in wallet",
-        feedbackMessage: "Confirm your vote in your wallet to continue.",
+        feedbackMessage: "Confirm your vote to continue.",
       },
     }));
 
@@ -228,7 +263,7 @@ export function VoteActionCard({
 
         setActionState((current) => ({
           ...current,
-          summary: "Your vote has been submitted onchain.",
+          summary: "Your vote has been submitted.",
           eligibility: {
             canVote: false,
             reason: "already_voted",
@@ -245,6 +280,10 @@ export function VoteActionCard({
             feedbackMessage: `Your ${selectedSupport} vote was submitted successfully.`,
           },
         }));
+
+        window.setTimeout(() => {
+          onVoteSuccess?.();
+        }, 800);
       } catch (error) {
         const message =
           error instanceof Error
@@ -282,69 +321,23 @@ export function VoteActionCard({
         <strong>{actionState.summary}</strong>
       </div>
 
-      <div className="action-panel__row">
-        <span>Eligibility</span>
-        <strong>{actionState.eligibility.title}</strong>
-      </div>
-
-      <div className="action-panel__support-grid">
-        {supportOptions.map((option) => {
-          const active = selectedSupport === option.value;
-
-          return (
-            <button
-              key={option.value}
-              type="button"
-              className={
-                active ? "action-option action-option--active" : "action-option"
-              }
-              onClick={() => setSelectedSupport(option.value)}
-              disabled={isPending || actionState.vote.status === "success"}
-            >
-              <strong>{option.label}</strong>
-              <span>{option.description}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div className="action-panel__feedback">
-        <div>
-          <p className="wallet-status__label">
-            {actionState.vote.feedbackTitle ?? "Review"}
-          </p>
-          <p className="wallet-status__value">
-            {actionState.vote.feedbackMessage ??
-              actionState.eligibility.description}
-          </p>
-          {actionState.vote.existingVote ? (
-            <p className="wallet-status__label">
-              Existing vote: {actionState.vote.existingVote}
-            </p>
-          ) : null}
+      {votingClosesLabel ? (
+        <div className="action-panel__row">
+          <span>Voting closes</span>
+          <strong>{votingClosesLabel}</strong>
         </div>
-        <StatusBadge
-          label={actionState.vote.status}
-          tone={getToneFromStatus(actionState.vote.status)}
-        />
-      </div>
+      ) : null}
 
       <div className="button-row">
         <button
           type="button"
-          className="button button--primary"
+          className="button-2 button--primary"
           disabled={buttonDisabled}
           onClick={handlePrimaryAction}
         >
           {buttonLabel}
         </button>
       </div>
-
-      <p className="wallet-status__label">
-        {needsDelegation
-          ? "Enable voting by self-delegating your governance power first."
-          : "Your vote is submitted directly to the governor contract and recorded onchain after wallet confirmation."}
-      </p>
     </div>
   );
 }

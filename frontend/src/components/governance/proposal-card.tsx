@@ -18,18 +18,21 @@ export function ProposalCard({ proposal, onVoteClick }: ProposalCardProps) {
   const showVotingActions = isActive && !hasAlreadyVoted && canVote;
   const showIneligibleMessage = isActive && !hasAlreadyVoted && !canVote;
 
+  const helperText =
+    proposal.actionsLabel || "Actions will appear once voting is active.";
+
   return (
     <article className="proposal-card">
       <div className="proposal-card__top">
-        <div className="proposal-card__headline">
-          <p className="proposal-card__category">
-            {getProposalCategoryLabel(proposal.category)}
-          </p>
+        <p className="proposal-card__category">
+          {getProposalCategoryLabel(proposal.category)}
+        </p>
+        <StatusBadge label={proposal.statusLabel} tone={proposal.statusTone} />
+
+        <div className="proposal-card__content-panel">
           <h2 className="proposal-card__title">{proposal.title}</h2>
           <p className="proposal-card__excerpt">{proposal.excerpt}</p>
         </div>
-
-        <StatusBadge label={proposal.statusLabel} tone={proposal.statusTone} />
       </div>
 
       <dl className="proposal-card__meta">
@@ -57,17 +60,17 @@ export function ProposalCard({ proposal, onVoteClick }: ProposalCardProps) {
           <div className="proposal-card__vote-actions">
             <button
               type="button"
-              className="proposal-card__button proposal-card__button--secondary"
-              onClick={() => onVoteClick?.(proposal.id, "against")}
-            >
-              No
-            </button>
-            <button
-              type="button"
-              className="proposal-card__button"
+              className="proposal-card__button proposal-card__button--yes"
               onClick={() => onVoteClick?.(proposal.id, "for")}
             >
               Yes
+            </button>
+            <button
+              type="button"
+              className="proposal-card__button proposal-card__button--no"
+              onClick={() => onVoteClick?.(proposal.id, "against")}
+            >
+              No
             </button>
           </div>
         ) : showIneligibleMessage ? (
@@ -75,10 +78,7 @@ export function ProposalCard({ proposal, onVoteClick }: ProposalCardProps) {
             Not eligible to vote on this proposal.
           </p>
         ) : (
-          <p className="proposal-card__helper">
-            {proposal.actionsLabel ??
-              "Actions will appear once voting is active."}
-          </p>
+          <p className="proposal-card__helper">{helperText}</p>
         )}
       </div>
     </article>

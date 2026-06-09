@@ -59,7 +59,7 @@ export default async function ProposalDetailPage({
               <dd>{proposal.votingStartsAt ?? "Waiting"}</dd>
             </div>
             <div>
-              <dt>Voting ends</dt>
+              <dt>Voting closes</dt>
               <dd>{proposal.votingEndsAt ?? "Waiting"}</dd>
             </div>
             <div>

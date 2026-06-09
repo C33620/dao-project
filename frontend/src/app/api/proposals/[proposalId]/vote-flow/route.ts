@@ -4,21 +4,34 @@ import { NextResponse } from "next/server";
 
 type RouteContext = {
   params: Promise<{
-    id: string;
+    proposalId: string;
   }>;
 };
 
 export async function GET(_request: Request, context: RouteContext) {
-  const { id } = await context.params;
+  const { proposalId } = await context.params;
 
   const [proposal, actionState] = await Promise.all([
-    getProposalById(id),
-    getProposalActionState(id),
+    getProposalById(proposalId),
+    getProposalActionState(proposalId),
   ]);
+
+  console.log("VOTE_FLOW_DEBUG", {
+    proposalId,
+    hasProposal: Boolean(proposal),
+    hasActionState: Boolean(actionState),
+  });
 
   if (!proposal || !actionState) {
     return NextResponse.json(
-      { message: "Proposal not found." },
+      {
+        message: "Proposal not found.",
+        debug: {
+          proposalId,
+          hasProposal: Boolean(proposal),
+          hasActionState: Boolean(actionState),
+        },
+      },
       { status: 404 },
     );
   }

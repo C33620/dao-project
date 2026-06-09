@@ -119,15 +119,26 @@ export function ProposalList({
 
   return (
     <>
-      <div className="proposal-list">
-        {proposals.map((proposal) => (
-          <ProposalCard
-            key={proposal.id}
-            proposal={proposal}
-            onVoteClick={handleVoteClick}
-          />
-        ))}
-      </div>
+      <section
+        className="proposal-list-section"
+        aria-labelledby="proposal-list-title"
+      >
+        <div className="proposal-list-section__header">
+          <h2 id="proposal-list-title" className="proposal-list-section__title">
+            Proposals to vote for
+          </h2>
+        </div>
+
+        <div className="proposal-list">
+          {proposals.map((proposal) => (
+            <ProposalCard
+              key={proposal.id}
+              proposal={proposal}
+              onVoteClick={handleVoteClick}
+            />
+          ))}
+        </div>
+      </section>
 
       {isModalOpen ? (
         <div
@@ -166,7 +177,7 @@ export function ProposalList({
               <div className="action-panel action-panel--interactive">
                 <p className="wallet-status__label">Preparing vote</p>
                 <p className="wallet-status__value">
-                  Loading proposal details and wallet action state...
+                  Loading proposal details...
                 </p>
               </div>
             ) : loadError ? (
@@ -179,6 +190,7 @@ export function ProposalList({
                 key={`${selectedProposal.id}-${preselectedSupport ?? "none"}`}
                 proposal={selectedProposal}
                 initialActionState={selectedActionState}
+                onVoteSuccess={closeModal}
               />
             ) : null}
           </div>

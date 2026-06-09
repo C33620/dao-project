@@ -5,25 +5,26 @@ import { getProposals } from "@/lib/services/proposals";
 import { CreateProposalEntryCard } from "./components/create-proposal-entry-card";
 
 export default async function ProposalsPage() {
-  const proposals = await getProposals("active");
+  const proposals = await getProposals("all");
+
+  const visibleProposals = proposals.filter(
+    (proposal) => proposal.status === "active" || proposal.status === "pending",
+  );
 
   return (
     <PageShell title="" description="">
       <div className="page-shell__content">
         <SectionCard
           title="Create a proposal"
-          description="Add a new proposal for the group to consider."
+          description="Write a proposal for the group to review and vote on."
         >
-          <CreateProposalEntryCard
-            origin="proposals"
-            description="Write a proposal for the group to review and vote on."
-          />
+          <CreateProposalEntryCard origin="proposals" description="" />
         </SectionCard>
 
         <ProposalList
-          proposals={proposals}
-          emptyTitle="No active proposals right now"
-          emptyDescription="When the governor opens a voting window, proposals will appear here."
+          proposals={visibleProposals}
+          emptyTitle="No proposals open right now"
+          emptyDescription="Active and pending proposals will appear here."
         />
       </div>
     </PageShell>

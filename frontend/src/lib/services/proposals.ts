@@ -62,6 +62,8 @@ type EnrichedProposal = {
 
 type GovernanceClockMode = "timestamp" | "blocknumber" | "unknown";
 
+const ESTIMATED_BLOCK_TIME_SECONDS = BigInt(12);
+
 function mapGovernorState(value: number): GovernorState {
   switch (value) {
     case 0:
@@ -214,9 +216,11 @@ function detectClockMode(
   return "unknown";
 }
 
-function formatVotingStart(
+function formatTimepointFromClockMode(
   timepoint: bigint | null,
   clockMode: GovernanceClockMode,
+  currentBlockNumber?: bigint,
+  currentBlockTimestampSeconds?: bigint,
 ): string | undefined {
   if (timepoint === null || timepoint <= BigInt(0)) {
     return undefined;
@@ -226,19 +230,19 @@ function formatVotingStart(
     return formatReadableDate(new Date(Number(timepoint) * 1000));
   }
 
-  return undefined;
-}
+  if (
+    clockMode === "blocknumber" &&
+    currentBlockNumber !== undefined &&
+    currentBlockTimestampSeconds !== undefined
+  ) {
+    const blockDelta = timepoint - currentBlockNumber;
+    const estimatedTimestamp =
+      currentBlockTimestampSeconds +
+      (blockDelta > BigInt(0)
+        ? blockDelta * ESTIMATED_BLOCK_TIME_SECONDS
+        : BigInt(0));
 
-function formatVotingEnd(
-  timepoint: bigint | null,
-  clockMode: GovernanceClockMode,
-): string | undefined {
-  if (timepoint === null || timepoint <= BigInt(0)) {
-    return undefined;
-  }
-
-  if (clockMode === "timestamp") {
-    return formatReadableDate(new Date(Number(timepoint) * 1000));
+    return formatReadableDate(new Date(Number(estimatedTimestamp) * 1000));
   }
 
   return undefined;
@@ -271,59 +275,62 @@ async function enrichProposal(
   const client = getBlockchainClient();
   const proposalId = BigInt(record.proposalId);
 
-  const [
-    rawState,
-    snapshot,
-    deadline,
-    eta,
-    needsQueuing,
-    voteTotals,
-    clockModeRaw,
-  ] = await Promise.all([
-    client.readContract({
-      address: MY_GOVERNOR_ADDRESS,
-      abi: governorAbi,
-      functionName: "state",
-      args: [proposalId],
-    }) as Promise<number>,
-    client.readContract({
-      address: MY_GOVERNOR_ADDRESS,
-      abi: governorAbi,
-      functionName: "proposalSnapshot",
-      args: [proposalId],
-    }) as Promise<bigint>,
-    client.readContract({
-      address: MY_GOVERNOR_ADDRESS,
-      abi: governorAbi,
-      functionName: "proposalDeadline",
-      args: [proposalId],
-    }) as Promise<bigint>,
-    client.readContract({
-      address: MY_GOVERNOR_ADDRESS,
-      abi: governorAbi,
-      functionName: "proposalEta",
-      args: [proposalId],
-    }) as Promise<bigint>,
-    client.readContract({
-      address: MY_GOVERNOR_ADDRESS,
-      abi: governorAbi,
-      functionName: "proposalNeedsQueuing",
-      args: [proposalId],
-    }) as Promise<boolean>,
-    client.readContract({
-      address: MY_GOVERNOR_ADDRESS,
-      abi: governorAbi,
-      functionName: "proposalVotes",
-      args: [proposalId],
-    }) as Promise<[bigint, bigint, bigint]>,
-    client.readContract({
-      address: MY_GOVERNOR_ADDRESS,
-      abi: governorAbi,
-      functionName: "CLOCK_MODE",
-    }) as Promise<string>,
-  ]);
+  const rawState = (await client.readContract({
+    address: MY_GOVERNOR_ADDRESS,
+    abi: governorAbi,
+    functionName: "state",
+    args: [proposalId],
+  })) as number;
+
+  const snapshot = (await client.readContract({
+    address: MY_GOVERNOR_ADDRESS,
+    abi: governorAbi,
+    functionName: "proposalSnapshot",
+    args: [proposalId],
+  })) as bigint;
+
+  const deadline = (await client.readContract({
+    address: MY_GOVERNOR_ADDRESS,
+    abi: governorAbi,
+    functionName: "proposalDeadline",
+    args: [proposalId],
+  })) as bigint;
+
+  const eta = (await client.readContract({
+    address: MY_GOVERNOR_ADDRESS,
+    abi: governorAbi,
+    functionName: "proposalEta",
+    args: [proposalId],
+  })) as bigint;
+
+  const needsQueuing = (await client.readContract({
+    address: MY_GOVERNOR_ADDRESS,
+    abi: governorAbi,
+    functionName: "proposalNeedsQueuing",
+    args: [proposalId],
+  })) as boolean;
+
+  const voteTotals = (await client.readContract({
+    address: MY_GOVERNOR_ADDRESS,
+    abi: governorAbi,
+    functionName: "proposalVotes",
+    args: [proposalId],
+  })) as [bigint, bigint, bigint];
+
+  const clockModeRaw = (await client.readContract({
+    address: MY_GOVERNOR_ADDRESS,
+    abi: governorAbi,
+    functionName: "CLOCK_MODE",
+  })) as string;
 
   const clockMode = detectClockMode(clockModeRaw);
+
+  const currentBlockNumber = await client.getBlockNumber();
+  const currentBlock = await client.getBlock({
+    blockNumber: currentBlockNumber,
+  });
+  const currentBlockTimestampSeconds = currentBlock.timestamp;
+
   const governorState = mapGovernorState(rawState);
   const status = governorStateToProposalStatus(governorState);
   const statusView = mapStatus(status);
@@ -335,38 +342,39 @@ async function enrichProposal(
   if (currentUserWallet) {
     const voter = currentUserWallet as Address;
 
-    const [hasUserVoted, delegatee, currentVotes, balance, tokenClock] =
-      await Promise.all([
-        client.readContract({
-          address: MY_GOVERNOR_ADDRESS,
-          abi: governorAbi,
-          functionName: "hasVoted",
-          args: [proposalId, voter],
-        }) as Promise<boolean>,
-        client.readContract({
-          address: GOVERNANCE_TOKEN_ADDRESS,
-          abi: governanceTokenAbi,
-          functionName: "delegates",
-          args: [voter],
-        }) as Promise<Address>,
-        client.readContract({
-          address: GOVERNANCE_TOKEN_ADDRESS,
-          abi: governanceTokenAbi,
-          functionName: "getVotes",
-          args: [voter],
-        }) as Promise<bigint>,
-        client.readContract({
-          address: GOVERNANCE_TOKEN_ADDRESS,
-          abi: governanceTokenAbi,
-          functionName: "balanceOf",
-          args: [voter],
-        }) as Promise<bigint>,
-        client.readContract({
-          address: GOVERNANCE_TOKEN_ADDRESS,
-          abi: governanceTokenAbi,
-          functionName: "clock",
-        }) as Promise<bigint>,
-      ]);
+    const hasUserVoted = (await client.readContract({
+      address: MY_GOVERNOR_ADDRESS,
+      abi: governorAbi,
+      functionName: "hasVoted",
+      args: [proposalId, voter],
+    })) as boolean;
+
+    const delegatee = (await client.readContract({
+      address: GOVERNANCE_TOKEN_ADDRESS,
+      abi: governanceTokenAbi,
+      functionName: "delegates",
+      args: [voter],
+    })) as Address;
+
+    const currentVotes = (await client.readContract({
+      address: GOVERNANCE_TOKEN_ADDRESS,
+      abi: governanceTokenAbi,
+      functionName: "getVotes",
+      args: [voter],
+    })) as bigint;
+
+    const balance = (await client.readContract({
+      address: GOVERNANCE_TOKEN_ADDRESS,
+      abi: governanceTokenAbi,
+      functionName: "balanceOf",
+      args: [voter],
+    })) as bigint;
+
+    const tokenClock = (await client.readContract({
+      address: GOVERNANCE_TOKEN_ADDRESS,
+      abi: governanceTokenAbi,
+      functionName: "clock",
+    })) as bigint;
 
     let snapshotVotes = BigInt(0);
 
@@ -403,11 +411,21 @@ async function enrichProposal(
 
   const votingStartsAt = record.votingStartsAt
     ? formatReadableDate(record.votingStartsAt)
-    : formatVotingStart(snapshot, clockMode);
+    : formatTimepointFromClockMode(
+        snapshot,
+        clockMode,
+        currentBlockNumber,
+        currentBlockTimestampSeconds,
+      );
 
   const votingEndsAt = record.votingEndsAt
     ? formatReadableDate(record.votingEndsAt)
-    : formatVotingEnd(deadline, clockMode);
+    : formatTimepointFromClockMode(
+        deadline,
+        clockMode,
+        currentBlockNumber,
+        currentBlockTimestampSeconds,
+      );
 
   const executableAt = record.executableAt
     ? formatReadableDate(record.executableAt)
@@ -423,6 +441,8 @@ async function enrichProposal(
     ? "Ready to queue"
     : canExecute
     ? "Ready to execute"
+    : governorState === "pending"
+    ? "Actions will appear once voting is active."
     : statusView.statusLabel;
 
   const summary: ProposalSummary = {
@@ -567,7 +587,7 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
     },
     protocolStatus: await getProtocolStatus(),
     recentProposals,
-    recentActivity: await getRecentGovernanceActivity(),
+    recentActivity: await getRecentGovernanceActivity("all"),
   };
 }
 
@@ -576,9 +596,16 @@ export async function getProposals(
 ): Promise<ProposalSummary[]> {
   const records = await getStoredProposalRecords();
   const currentUserWallet = await getCurrentUserWalletAddress();
-  const enriched = await Promise.all(
-    records.map((record) => enrichProposal(record, currentUserWallet)),
-  );
+  const enriched: EnrichedProposal[] = [];
+
+  for (const record of records) {
+    try {
+      const proposal = await enrichProposal(record, currentUserWallet);
+      enriched.push(proposal);
+    } catch (error) {
+      console.error("GET_PROPOSALS_ENRICH_ERROR", record.proposalId, error);
+    }
+  }
 
   return enriched
     .filter((proposal) => includeByFilter(proposal, filter))
@@ -741,18 +768,35 @@ export async function getProposalTimeline(
   return timeline;
 }
 
-export async function getRecentGovernanceActivity(): Promise<
-  GovernanceActivityItem[]
-> {
+export async function getRecentGovernanceActivity(
+  filter: "all" | "voted" | "executed" = "all",
+): Promise<GovernanceActivityItem[]> {
   const records = await getStoredProposalRecords();
   const currentUserWallet = await getCurrentUserWalletAddress();
-  const enriched = await Promise.all(
-    records
-      .slice(0, 10)
-      .map((record) => enrichProposal(record, currentUserWallet)),
-  );
 
-  return enriched.map((item) => ({
+  const enriched: EnrichedProposal[] = [];
+
+  for (const record of records) {
+    try {
+      const proposal = await enrichProposal(record, currentUserWallet);
+      enriched.push(proposal);
+    } catch (error) {
+      console.error(
+        "RECENT_GOVERNANCE_ACTIVITY_ENRICH_ERROR",
+        record.proposalId,
+        error,
+      );
+    }
+  }
+
+  const filtered =
+    filter === "voted"
+      ? enriched.filter((item) => item.flags.hasVoted)
+      : filter === "executed"
+      ? enriched.filter((item) => item.summary.status === "executed")
+      : enriched;
+
+  return filtered.map((item) => ({
     id: `proposal-${item.summary.id}-${item.summary.status}`,
     type: "proposal_created",
     title: item.summary.title,

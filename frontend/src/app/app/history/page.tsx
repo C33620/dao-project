@@ -4,17 +4,14 @@ import { getProposalCategoryLabel } from "@/lib/governance/create-proposal";
 import { getRecentGovernanceActivity } from "@/lib/services/proposals";
 
 export default async function HistoryPage() {
-  const activity = await getRecentGovernanceActivity();
+  const activity = await getRecentGovernanceActivity("executed");
 
   return (
-    <PageShell
-      title="History"
-      description="A chronological view of recent governance lifecycle activity."
-    >
+    <PageShell title="" description="">
       <div className="page-shell__content">
         <SectionCard
-          title="Recent activity"
-          description="The newest lifecycle and participation-related updates appear first."
+          title="Executed proposals"
+          description="Only proposals that reached execution appear here, newest first."
         >
           <div className="activity-feed">
             {activity.length > 0 ? (
@@ -41,10 +38,10 @@ export default async function HistoryPage() {
                 <div className="empty-state__icon" aria-hidden="true">
                   ≣
                 </div>
-                <h2>No history yet</h2>
+                <h2>No executed proposals yet</h2>
                 <p>
-                  Governance lifecycle activity will appear here once proposals
-                  move onchain.
+                  Proposals will appear here once they complete the governance
+                  lifecycle and are executed onchain.
                 </p>
               </div>
             )}

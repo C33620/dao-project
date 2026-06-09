@@ -564,6 +564,7 @@ export default function CreateProposalClient({
 
       setIsReviewOpen(false);
       setSubmissionStage("idle");
+      window.location.href = `${returnHref}?created=${proposalId.toString()}`;
     } catch (error) {
       console.error("GOVERNOR_PROPOSAL_SUBMISSION_ERROR", error);
       setSubmissionStage("error");
@@ -585,7 +586,8 @@ export default function CreateProposalClient({
           <h2>Proposal submitted</h2>
           <p>
             Your proposal has been created and its details were saved
-            successfully.
+            successfully. It will appear in the proposals list in a pending
+            state.
           </p>
         </div>
 

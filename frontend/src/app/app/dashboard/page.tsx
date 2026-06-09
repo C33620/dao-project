@@ -22,12 +22,9 @@ export default async function DashboardPage() {
       <div className="dashboard-stack">
         <SectionCard
           title="Create a proposal"
-          description="Start something the group can consider together."
+          description="Write a proposal for the group to review and vote on."
         >
-          <CreateProposalEntryCard
-            origin="dashboard"
-            description="Write a proposal for the group to review and vote on."
-          />
+          <CreateProposalEntryCard origin="dashboard" description="" />
         </SectionCard>
 
         <div className="two-column-layout">

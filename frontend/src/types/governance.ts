@@ -77,6 +77,7 @@ export type ProposalDetail = ProposalSummary & {
   votes: ProposalVoteTotals;
   timeline: ProposalTimelineItem[];
   actionsLabel: string;
+  deadlineAt?: string;
   governance?: ProposalGovernanceFlags;
 };
 
