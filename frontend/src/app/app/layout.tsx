@@ -7,7 +7,7 @@ type AppLayoutProps = {
 };
 
 export default async function AppLayout({ children }: AppLayoutProps) {
-  await requireUser();
+  const currentUser = await requireUser();
 
-  return <AppShellLayout>{children}</AppShellLayout>;
+  return <AppShellLayout role={currentUser.role}>{children}</AppShellLayout>;
 }

@@ -1,20 +1,26 @@
 "use client";
 
-import { appNav } from "@/config/nav";
+import { appNav, type AppRole } from "@/config/nav";
 import { cn } from "@/lib/utils/cn";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 type AppSidebarProps = {
   open: boolean;
   onClose: () => void;
+  role: AppRole;
 };
 
-export function AppSidebar({ open, onClose }: AppSidebarProps) {
+export function AppSidebar({ open, onClose, role }: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isSigningOut, setIsSigningOut] = useState(false);
+
+  const visibleNav = useMemo(
+    () => appNav.filter((item) => !item.roles || item.roles.includes(role)),
+    [role],
+  );
 
   async function handleSignOut() {
     setIsSigningOut(true);
@@ -40,7 +46,7 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
     <>
       <aside className={cn("app-sidebar", open && "app-sidebar--open")}>
         <nav className="app-sidebar__nav" aria-label="Primary navigation">
-          {appNav.map((item) => {
+          {visibleNav.map((item) => {
             const isActive =
               pathname === item.href || pathname.startsWith(`${item.href}/`);
 

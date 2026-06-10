@@ -1,7 +1,10 @@
+export type AppRole = "member" | "delegate" | "admin" | "viewer";
+
 export type AppNavItem = {
   title: string;
   href: string;
   description?: string;
+  roles?: AppRole[];
 };
 
 export const appNav: AppNavItem[] = [
@@ -13,22 +16,28 @@ export const appNav: AppNavItem[] = [
   {
     title: "Proposals",
     href: "/app/proposals",
-    description: "Items ready for review",
+    description: "Items ready for voting",
   },
   {
     title: "Finalize",
     href: "/app/execute",
-    description: "Items ready or nearly ready",
+    description: "Items ready to be validated",
   },
   {
     title: "History",
     href: "/app/history",
-    description: "Your recent activity",
+    description: "Items successfuly voted",
   },
   {
     title: "Invitation code",
     href: "/app/invitation-code",
-    description: "Your current access code",
+    description: "Your current code to share",
+  },
+  {
+    title: "Admin",
+    href: "/app/admin/treasury",
+    description: "Treasury queue and operations",
+    roles: ["admin"],
   },
   {
     title: "Settings",

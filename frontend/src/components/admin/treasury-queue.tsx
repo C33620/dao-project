@@ -91,7 +91,16 @@ function getSepoliaTxUrl(txHash: string) {
 }
 
 function getKindLabel(kind: string) {
-  return kind.replaceAll("_", " ");
+  switch (kind) {
+    case "INITIAL_ALLOCATION":
+      return "Initial allocation";
+    case "INITIAL_GAS_FUNDING":
+      return "Initial gas funding";
+    case "LOW_BALANCE_GAS_REFILL":
+      return "Low balance gas refill";
+    default:
+      return kind.replaceAll("_", " ");
+  }
 }
 
 function getAssetLabel(item: TreasuryQueueItem) {

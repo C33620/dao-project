@@ -2,16 +2,24 @@ import { CreateProposalEntryCard } from "@/app/app/proposals/components/create-p
 import { ProposalList } from "@/components/governance/proposal-list";
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
+import { getCurrentUser } from "@/lib/auth";
 import {
-  getProposals,
+  getExecutableProposals,
   getRecentGovernanceActivity,
 } from "@/lib/services/proposals";
+import { ensureLowBalanceGasRefillForUser } from "@/lib/treasury/distribute";
 import Link from "next/link";
 
 export default async function DashboardPage() {
+  const currentUser = await getCurrentUser();
+
+  if (currentUser?.id) {
+    await ensureLowBalanceGasRefillForUser(currentUser.id);
+  }
+
   const [proposalsToValidate, recentActivity] = await Promise.all([
-    getProposals("active"),
-    getRecentGovernanceActivity(),
+    getExecutableProposals(),
+    getRecentGovernanceActivity("executed"),
   ]);
 
   const votedPreview = recentActivity.slice(0, 3);

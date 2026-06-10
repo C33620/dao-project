@@ -26,6 +26,10 @@ const titles: Record<string, { title: string; subtitle: string }> = {
     title: "History",
     subtitle: "Follow the most recent activity in a simple chronological view.",
   },
+  "/app/admin/treasury": {
+    title: "Admin",
+    subtitle: "Treasury queues and operations.",
+  },
   "/app/settings": {
     title: "Settings",
     subtitle: "View account details, session status, and simple preferences.",

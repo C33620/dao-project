@@ -108,12 +108,6 @@ export default async function AdminTreasuryPage() {
 
   return (
     <main className="page-shell">
-      <header className="page-shell__header">
-        <div className="page-shell__heading heading-admin-dashboard">
-          <h1>Treasury operations</h1>
-        </div>
-      </header>
-
       <section className="page-shell__content" aria-label="Treasury queue">
         <TreasuryQueue
           initialPendingItems={pendingItems}

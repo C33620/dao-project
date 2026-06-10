@@ -1,5 +1,6 @@
 import "server-only";
 
+import { getBlockchainClient } from "@/lib/blockchain/client";
 import { db } from "@/lib/db";
 import { writeTreasuryAuditEvent } from "@/lib/treasury/audit";
 import {
@@ -8,9 +9,12 @@ import {
   TreasuryDistributionKind,
   TreasuryDistributionStatus,
 } from "@prisma/client";
+import type { Address } from "viem";
 
 const INITIAL_ALLOCATION_KIND = TreasuryDistributionKind.INITIAL_ALLOCATION;
 const INITIAL_GAS_FUNDING_KIND = TreasuryDistributionKind.INITIAL_GAS_FUNDING;
+const LOW_BALANCE_GAS_REFILL_KIND =
+  TreasuryDistributionKind.LOW_BALANCE_GAS_REFILL;
 
 const REQUIRED_SETUP_KINDS = [
   INITIAL_ALLOCATION_KIND,
@@ -89,6 +93,45 @@ function getRequiredDistributionConfigs(userId: string): DistributionConfig[] {
   ];
 }
 
+function getLowBalanceGasRefillConfig(userId: string): DistributionConfig {
+  const gasRefillAmountBaseUnits = process.env.TREASURY_LOW_BALANCE_REFILL_WEI;
+
+  if (!gasRefillAmountBaseUnits) {
+    throw new Error("TREASURY_LOW_BALANCE_REFILL_WEI is not configured.");
+  }
+
+  return {
+    kind: LOW_BALANCE_GAS_REFILL_KIND,
+    amountBaseUnits: gasRefillAmountBaseUnits,
+    tokenAddress: null,
+    queuedEvent: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_QUEUED,
+    blockedPausedEvent:
+      TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_BLOCKED_PAUSED,
+    blockedAlreadyFundedEvent:
+      TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_BLOCKED_ALREADY_FUNDED,
+    submittedEvent: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_SUBMITTED,
+    confirmedEvent: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_CONFIRMED,
+    failedEvent: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_FAILED,
+    idempotencyKey: `low-balance-gas-refill:${userId}`,
+  };
+}
+
+function getLowBalanceThresholdWei() {
+  const value = process.env.TREASURY_LOW_BALANCE_THRESHOLD_WEI;
+
+  if (!value) {
+    throw new Error("TREASURY_LOW_BALANCE_THRESHOLD_WEI is not configured.");
+  }
+
+  if (!/^\d+$/.test(value)) {
+    throw new Error(
+      "TREASURY_LOW_BALANCE_THRESHOLD_WEI must be an integer string.",
+    );
+  }
+
+  return BigInt(value);
+}
+
 async function recomputeUserTreasurySetup(userId: string) {
   const rows = await db.treasuryDistribution.findMany({
     where: {
@@ -164,9 +207,22 @@ async function queueSingleDistributionForUser(
         kind: config.kind,
       },
     },
+    include: {
+      user: {
+        select: {
+          id: true,
+          issuer: true,
+          normalizedEmail: true,
+          walletAddress: true,
+        },
+      },
+    },
   });
 
-  if (existing?.status === TreasuryDistributionStatus.SUCCEEDED) {
+  if (
+    existing?.status === TreasuryDistributionStatus.SUCCEEDED &&
+    config.kind !== LOW_BALANCE_GAS_REFILL_KIND
+  ) {
     await writeTreasuryAuditEvent({
       userId: input.userId,
       type: config.blockedAlreadyFundedEvent,
@@ -196,11 +252,32 @@ async function queueSingleDistributionForUser(
     ? await db.treasuryDistribution.update({
         where: { id: existing.id },
         data: {
+          status:
+            existing.status === TreasuryDistributionStatus.SUBMITTED
+              ? existing.status
+              : nextStatus,
           walletAddress: input.walletAddress,
           tokenAddress: config.tokenAddress ?? null,
           chainId,
           amountBaseUnits: config.amountBaseUnits,
           processedAt: new Date(),
+          submittedAt:
+            config.kind === LOW_BALANCE_GAS_REFILL_KIND &&
+            existing.status === TreasuryDistributionStatus.SUCCEEDED
+              ? null
+              : existing.submittedAt,
+          confirmedAt:
+            config.kind === LOW_BALANCE_GAS_REFILL_KIND &&
+            existing.status === TreasuryDistributionStatus.SUCCEEDED
+              ? null
+              : existing.confirmedAt,
+          txHash:
+            config.kind === LOW_BALANCE_GAS_REFILL_KIND &&
+            existing.status === TreasuryDistributionStatus.SUCCEEDED
+              ? null
+              : existing.txHash,
+          lastErrorCode: null,
+          lastErrorMessage: null,
         },
       })
     : await db.treasuryDistribution.create({
@@ -294,12 +371,109 @@ export async function queueInitialAllocationForUser(
   return queueInitialFundingForUser(input);
 }
 
+export async function ensureLowBalanceGasRefillForUser(userId: string) {
+  console.log("[refill-check] called for userId", userId);
+
+  const user = await db.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      issuer: true,
+      normalizedEmail: true,
+      walletAddress: true,
+      role: true,
+    },
+  });
+
+  console.log("[refill-check] user", JSON.stringify(user));
+
+  if (!user || !user.walletAddress || !user.issuer) {
+    console.log("[refill-check] skipped - missing user data");
+    return { status: "skipped" as const, reason: "missing-user-data" as const };
+  }
+
+   if (user.role === "VIEWER") {
+     return { status: "skipped" as const, reason: "non-member-role" as const };
+   }
+
+  const thresholdWei = getLowBalanceThresholdWei();
+  console.log("[refill-check] threshold", thresholdWei.toString());
+
+  const client = getBlockchainClient();
+  const balanceWei = await client.getBalance({
+    address: user.walletAddress as Address,
+  });
+
+  console.log(
+    "[refill-check] balance",
+    balanceWei.toString(),
+    "threshold",
+    thresholdWei.toString(),
+    "needs refill",
+    balanceWei < thresholdWei,
+  );
+
+  // ... rest of the function unchanged
+
+  if (balanceWei >= thresholdWei) {
+    return {
+      status: "not_needed" as const,
+      balanceWei: balanceWei.toString(),
+      thresholdWei: thresholdWei.toString(),
+    };
+  }
+
+  const config = getLowBalanceGasRefillConfig(user.id);
+
+  await writeTreasuryAuditEvent({
+    userId: user.id,
+    type: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_REQUESTED,
+    normalizedEmail: user.normalizedEmail,
+    issuer: user.issuer,
+    walletAddress: user.walletAddress,
+    kind: config.kind,
+    amountBaseUnits: config.amountBaseUnits,
+    chainId: getTreasuryChainId(),
+    idempotencyKey: config.idempotencyKey,
+    metadata: {
+      thresholdWei: thresholdWei.toString(),
+      observedBalanceWei: balanceWei.toString(),
+      trigger: "dashboard-login-check",
+    },
+  });
+
+  const result = await queueSingleDistributionForUser(
+    {
+      userId: user.id,
+      normalizedEmail: user.normalizedEmail,
+      issuer: user.issuer,
+      walletAddress: user.walletAddress,
+    },
+    config,
+  );
+
+  return {
+    status: result.status,
+    distributionId: result.distribution.id,
+    balanceWei: balanceWei.toString(),
+    thresholdWei: thresholdWei.toString(),
+  };
+}
+
 function getAuditEventConfig(kind: TreasuryDistributionKind) {
   if (kind === INITIAL_GAS_FUNDING_KIND) {
     return {
       submittedEvent: TreasuryAuditEventType.INITIAL_GAS_FUNDING_SUBMITTED,
       confirmedEvent: TreasuryAuditEventType.INITIAL_GAS_FUNDING_CONFIRMED,
       failedEvent: TreasuryAuditEventType.INITIAL_GAS_FUNDING_FAILED,
+    };
+  }
+
+  if (kind === LOW_BALANCE_GAS_REFILL_KIND) {
+    return {
+      submittedEvent: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_SUBMITTED,
+      confirmedEvent: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_CONFIRMED,
+      failedEvent: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_FAILED,
     };
   }
 

@@ -1,19 +1,20 @@
+import Link from "next/link";
+
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getProposalCategoryLabel } from "@/lib/governance/create-proposal";
-import { getProposals } from "@/lib/services/proposals";
-import Link from "next/link";
+import { getExecutableProposals } from "@/lib/services/proposals";
 
 export default async function ExecutePage() {
-  const proposals = await getProposals("queued");
+  const proposals = await getExecutableProposals();
 
   return (
     <PageShell title="" description="">
       <div className="page-shell__content">
         <SectionCard
-          title="Ready or nearly ready"
-          description="These items are passed, queued, or close to execution."
+          title="Ready to execute"
+          description="These proposals have cleared the timelock and can be executed now."
         >
           <div className="execution-list">
             {proposals.length > 0 ? (
@@ -65,10 +66,10 @@ export default async function ExecutePage() {
                 <div className="empty-state__icon" aria-hidden="true">
                   ≣
                 </div>
-                <h2>Nothing is queued right now</h2>
+                <h2>Nothing needs execution right now</h2>
                 <p>
-                  Passed proposals will appear here when they need queueing or
-                  execution.
+                  Only proposals that are fully ready for execution appear on
+                  this page.
                 </p>
               </div>
             )}

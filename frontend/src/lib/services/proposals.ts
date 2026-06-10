@@ -167,6 +167,29 @@ async function getStoredProposalRecords() {
   });
 }
 
+export async function getExecutableProposals(): Promise<ProposalSummary[]> {
+  const records = await getStoredProposalRecords();
+  const currentUserWallet = await getCurrentUserWalletAddress();
+  const enriched: EnrichedProposal[] = [];
+
+  for (const record of records) {
+    try {
+      const proposal = await enrichProposal(record, currentUserWallet);
+      enriched.push(proposal);
+    } catch (error) {
+      console.error(
+        "GET_EXECUTABLE_PROPOSALS_ENRICH_ERROR",
+        record.proposalId,
+        error,
+      );
+    }
+  }
+
+  return enriched
+    .filter((proposal) => proposal.flags.canExecute)
+    .map((proposal) => proposal.summary);
+}
+
 async function getCurrentUserWalletAddress() {
   const user = await getCurrentUser();
 
