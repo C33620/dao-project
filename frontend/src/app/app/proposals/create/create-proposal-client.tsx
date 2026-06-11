@@ -25,6 +25,7 @@ import {
   type TransactionReceipt,
 } from "ethers";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { useReadContract } from "wagmi";
 
@@ -178,6 +179,7 @@ export default function CreateProposalClient({
   walletAddress,
   accountReadiness,
 }: CreateProposalClientProps) {
+  const router = useRouter();
   const accountAddress = walletAddress;
 
   const [proposalText, setProposalText] = useState("");
@@ -562,9 +564,16 @@ export default function CreateProposalClient({
         throw new Error("Proposal metadata request failed.");
       }
 
+      await fetch("/api/revalidate-governance", {
+        method: "POST",
+      });
+
       setIsReviewOpen(false);
       setSubmissionStage("idle");
-      window.location.href = `${returnHref}?created=${proposalId.toString()}`;
+
+      const destination = `${returnHref}?created=${proposalId.toString()}`;
+      router.replace(destination);
+      router.refresh();
     } catch (error) {
       console.error("GOVERNOR_PROPOSAL_SUBMISSION_ERROR", error);
       setSubmissionStage("error");

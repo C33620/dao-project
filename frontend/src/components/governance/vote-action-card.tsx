@@ -13,7 +13,9 @@ import type {
   VoteSupport,
 } from "@/types/governance";
 import { BrowserProvider, Contract } from "ethers";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
+
 type VoteActionCardProps = {
   proposal: ProposalDetail;
   initialActionState: ProposalActionState;
@@ -28,6 +30,17 @@ function toGovernorSupport(support: VoteSupport): number {
       return 1;
     case "abstain":
       return 2;
+  }
+}
+
+async function revalidateGovernanceCache(): Promise<void> {
+  const response = await fetch("/api/revalidate-governance", {
+    method: "POST",
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to revalidate governance cache.");
   }
 }
 
@@ -123,10 +136,21 @@ export function VoteActionCard({
   initialActionState,
   onVoteSuccess,
 }: VoteActionCardProps) {
+  const router = useRouter();
   const [actionState, setActionState] = useState(initialActionState);
   const [selectedSupport] = useState<VoteSupport | undefined>(
     initialActionState.vote.selectedSupport,
   );
+
+  const selectedSupportLabel =
+    selectedSupport === "for"
+      ? "Yes"
+      : selectedSupport === "against"
+      ? "No"
+      : selectedSupport === "abstain"
+      ? "Abstain"
+      : null;
+
   const [isPending, startTransition] = useTransition();
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -193,6 +217,7 @@ export function VoteActionCard({
     startTransition(async () => {
       try {
         await enableVotingPowerOnchain();
+        await revalidateGovernanceCache();
 
         setActionState((current) => ({
           ...current,
@@ -211,6 +236,8 @@ export function VoteActionCard({
               "Your self-delegation was confirmed. Review your vote and submit.",
           },
         }));
+
+        router.refresh();
       } catch (error) {
         const message =
           error instanceof Error
@@ -252,7 +279,7 @@ export function VoteActionCard({
         status: "submitting",
         selectedSupport,
         submitLabel: "Submitting vote...",
-        feedbackTitle: "Action needed in wallet",
+        feedbackTitle: "Action needed",
         feedbackMessage: "Confirm your vote to continue.",
       },
     }));
@@ -260,6 +287,7 @@ export function VoteActionCard({
     startTransition(async () => {
       try {
         await submitVoteOnchain(proposal.id, selectedSupport);
+        await revalidateGovernanceCache();
 
         setActionState((current) => ({
           ...current,
@@ -280,6 +308,8 @@ export function VoteActionCard({
             feedbackMessage: `Your ${selectedSupport} vote was submitted successfully.`,
           },
         }));
+
+        router.refresh();
 
         window.setTimeout(() => {
           onVoteSuccess?.();
@@ -325,6 +355,13 @@ export function VoteActionCard({
         <div className="action-panel__row">
           <span>Voting closes</span>
           <strong>{votingClosesLabel}</strong>
+        </div>
+      ) : null}
+
+      {selectedSupportLabel ? (
+        <div className="action-panel__row">
+          <span>Vote chosen</span>
+          <strong>{selectedSupportLabel}</strong>
         </div>
       ) : null}
 

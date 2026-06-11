@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { ExecuteActionCard } from "@/components/governance/execute-action-card";
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -52,6 +53,7 @@ export default async function ExecutePage() {
                   </dl>
 
                   <div className="execution-item__actions">
+                    <ExecuteActionCard proposal={proposal} />
                     <Link
                       href={`/app/proposals/${proposal.id}`}
                       className="button button--secondary"

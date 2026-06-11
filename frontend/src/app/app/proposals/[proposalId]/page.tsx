@@ -1,3 +1,4 @@
+import { ProposalAutoRefresh } from "@/components/governance/proposal-auto-refresh";
 import { SectionCard } from "@/components/ui/section-card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { getProposalCategoryLabel } from "@/lib/governance/create-proposal";
@@ -23,6 +24,11 @@ export default async function ProposalDetailPage({
 
   return (
     <div className="proposal-detail">
+      <ProposalAutoRefresh
+        status={proposal.status}
+        hasVoted={proposal.governance.hasVoted}
+      />
+
       <section className="proposal-detail__hero">
         <div className="proposal-detail__hero-content">
           <p className="proposal-detail__eyebrow">

@@ -10,9 +10,15 @@ type AppSidebarProps = {
   open: boolean;
   onClose: () => void;
   role: AppRole;
+  adminPendingCount?: number;
 };
 
-export function AppSidebar({ open, onClose, role }: AppSidebarProps) {
+export function AppSidebar({
+  open,
+  onClose,
+  role,
+  adminPendingCount = 0,
+}: AppSidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [isSigningOut, setIsSigningOut] = useState(false);
@@ -50,6 +56,17 @@ export function AppSidebar({ open, onClose, role }: AppSidebarProps) {
             const isActive =
               pathname === item.href || pathname.startsWith(`${item.href}/`);
 
+            const isAdminItem = item.href === "/app/admin/treasury";
+            const showAdminBadge = isAdminItem && adminPendingCount > 0;
+            const badgeLabel =
+              adminPendingCount > 99 ? "99+" : String(adminPendingCount);
+
+            const ariaLabel = showAdminBadge
+              ? `${item.title}, ${adminPendingCount} pending admin action${
+                  adminPendingCount === 1 ? "" : "s"
+                }`
+              : undefined;
+
             return (
               <Link
                 key={item.href}
@@ -57,8 +74,20 @@ export function AppSidebar({ open, onClose, role }: AppSidebarProps) {
                 onClick={onClose}
                 className={cn("app-sidebar__link", isActive && "is-active")}
                 aria-current={isActive ? "page" : undefined}
+                aria-label={ariaLabel}
               >
-                <span className="app-sidebar__link-title">{item.title}</span>
+                <div className="app-sidebar__link-row">
+                  <span className="app-sidebar__link-title">{item.title}</span>
+
+                  {showAdminBadge ? (
+                    <span
+                      className="app-sidebar__notification-badge"
+                      aria-hidden="true"
+                    >
+                      {badgeLabel}
+                    </span>
+                  ) : null}
+                </div>
 
                 {item.description ? (
                   <span className="app-sidebar__link-description">

@@ -516,7 +516,7 @@ export default function AuthPage() {
               >
                 {requiresInviteCode === false
                   ? "No activation code is required for the first account."
-                  : "The first account can be created without a code. Additional accounts require an activation code."}
+                  : "You need an activation code to create an account."}
               </p>
             ) : null}
 

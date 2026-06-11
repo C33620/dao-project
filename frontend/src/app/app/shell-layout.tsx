@@ -8,9 +8,14 @@ import { ReactNode, useState } from "react";
 type AppShellLayoutProps = {
   children: ReactNode;
   role: AppRole;
+  adminPendingCount?: number;
 };
 
-export function AppShellLayout({ children, role }: AppShellLayoutProps) {
+export function AppShellLayout({
+  children,
+  role,
+  adminPendingCount = 0,
+}: AppShellLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
@@ -19,6 +24,7 @@ export function AppShellLayout({ children, role }: AppShellLayoutProps) {
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         role={role}
+        adminPendingCount={adminPendingCount}
       />
 
       <div className="app-shell__main">

@@ -2670,3 +2670,28 @@ main {
   letter-spacing: -0.02em;
   text-align: right;
 }
+
+.app-sidebar__link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+}
+
+.app-sidebar__notification-badge {
+  min-width: 1.5rem;
+  box-shadow: 0 0 0 2px var(--color-surface, #fff);
+  height: 1.5rem;
+  padding: 0 0.4rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1;
+  background: var(--color-notification, #a13544);
+  color: white;
+  flex-shrink: 0;
+}

@@ -78,7 +78,7 @@ export type ProposalDetail = ProposalSummary & {
   timeline: ProposalTimelineItem[];
   actionsLabel: string;
   deadlineAt?: string;
-  governance?: ProposalGovernanceFlags;
+  governance: ProposalGovernanceFlags;
 };
 
 export type ProposalGovernanceFlags = {

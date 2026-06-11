@@ -3,6 +3,7 @@ import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
 import { getProposals } from "@/lib/services/proposals";
 import { CreateProposalEntryCard } from "./components/create-proposal-entry-card";
+import { ProposalsAutoRefresh } from "./components/proposals-auto-refresh";
 
 export default async function ProposalsPage() {
   const proposals = await getProposals("all");
@@ -13,6 +14,8 @@ export default async function ProposalsPage() {
 
   return (
     <PageShell title="" description="">
+      <ProposalsAutoRefresh intervalMs={15000} />
+
       <div className="page-shell__content">
         <SectionCard
           title="Create a proposal"

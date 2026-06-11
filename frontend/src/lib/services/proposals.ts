@@ -20,6 +20,7 @@ import type {
   ProtocolStatusItem,
   StatusTone,
 } from "@/types/governance";
+import { unstable_cache } from "next/cache";
 import type { Address, Hex } from "viem";
 
 export type ProposalTimelineEvent = {
@@ -62,7 +63,26 @@ type EnrichedProposal = {
 
 type GovernanceClockMode = "timestamp" | "blocknumber" | "unknown";
 
+type SharedGovernanceContext = {
+  clockMode: GovernanceClockMode;
+  currentBlockNumber: bigint;
+  currentBlockTimestampSeconds: bigint;
+};
+
+type UserGovernanceContext = {
+  currentUserWallet: string | null;
+  voterContext: {
+    voter: Address;
+    delegatee: Address;
+    currentVotes: bigint;
+    balance: bigint;
+    tokenClock: bigint;
+  } | null;
+};
+
 const ESTIMATED_BLOCK_TIME_SECONDS = BigInt(12);
+
+export const GOVERNANCE_PROPOSALS_TAG = "governance-proposals";
 
 function mapGovernorState(value: number): GovernorState {
   switch (value) {
@@ -167,29 +187,6 @@ async function getStoredProposalRecords() {
   });
 }
 
-export async function getExecutableProposals(): Promise<ProposalSummary[]> {
-  const records = await getStoredProposalRecords();
-  const currentUserWallet = await getCurrentUserWalletAddress();
-  const enriched: EnrichedProposal[] = [];
-
-  for (const record of records) {
-    try {
-      const proposal = await enrichProposal(record, currentUserWallet);
-      enriched.push(proposal);
-    } catch (error) {
-      console.error(
-        "GET_EXECUTABLE_PROPOSALS_ENRICH_ERROR",
-        record.proposalId,
-        error,
-      );
-    }
-  }
-
-  return enriched
-    .filter((proposal) => proposal.flags.canExecute)
-    .map((proposal) => proposal.summary);
-}
-
 async function getCurrentUserWalletAddress() {
   const user = await getCurrentUser();
 
@@ -291,68 +288,187 @@ function safeJsonStringArray(value: unknown): string[] | null {
   return value;
 }
 
+async function withRpcRetry<T>(
+  fn: () => Promise<T>,
+  retries = 3,
+  baseDelayMs = 400,
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+      const isRateLimit =
+        message.includes("Too Many Requests") ||
+        message.includes("Status: 429");
+
+      if (!isRateLimit || attempt === retries) {
+        throw error;
+      }
+
+      const delayMs = baseDelayMs * 2 ** attempt;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError;
+}
+
+async function buildSharedGovernanceContext(): Promise<SharedGovernanceContext> {
+  const client = getBlockchainClient();
+
+  const [clockModeRaw, currentBlockNumber, currentBlock] = await withRpcRetry(
+    async () => {
+      const clockModePromise = client.readContract({
+        address: MY_GOVERNOR_ADDRESS,
+        abi: governorAbi,
+        functionName: "CLOCK_MODE",
+      }) as Promise<string>;
+
+      const blockNumberPromise = client.getBlockNumber();
+
+      const [clockMode, blockNumber] = await Promise.all([
+        clockModePromise,
+        blockNumberPromise,
+      ]);
+
+      const block = await client.getBlock({ blockNumber });
+
+      return [clockMode, blockNumber, block] as const;
+    },
+  );
+
+  return {
+    clockMode: detectClockMode(clockModeRaw),
+    currentBlockNumber,
+    currentBlockTimestampSeconds: currentBlock.timestamp,
+  };
+}
+
+async function buildUserGovernanceContext(): Promise<UserGovernanceContext> {
+  const client = getBlockchainClient();
+  const currentUserWallet = await getCurrentUserWalletAddress();
+
+  if (!currentUserWallet) {
+    return {
+      currentUserWallet: null,
+      voterContext: null,
+    };
+  }
+
+  const voter = currentUserWallet as Address;
+
+  const [delegatee, currentVotes, balance, tokenClock] = await withRpcRetry(
+    async () => {
+      const results = await client.multicall({
+        contracts: [
+          {
+            address: GOVERNANCE_TOKEN_ADDRESS,
+            abi: governanceTokenAbi,
+            functionName: "delegates",
+            args: [voter],
+          },
+          {
+            address: GOVERNANCE_TOKEN_ADDRESS,
+            abi: governanceTokenAbi,
+            functionName: "getVotes",
+            args: [voter],
+          },
+          {
+            address: GOVERNANCE_TOKEN_ADDRESS,
+            abi: governanceTokenAbi,
+            functionName: "balanceOf",
+            args: [voter],
+          },
+          {
+            address: GOVERNANCE_TOKEN_ADDRESS,
+            abi: governanceTokenAbi,
+            functionName: "clock",
+          },
+        ],
+        allowFailure: false,
+      });
+
+      return results as [Address, bigint, bigint, bigint];
+    },
+  );
+
+  return {
+    currentUserWallet,
+    voterContext: {
+      voter,
+      delegatee,
+      currentVotes,
+      balance,
+      tokenClock,
+    },
+  };
+}
+
 async function enrichProposal(
   record: StoredProposalRecord,
-  currentUserWallet: string | null,
+  sharedContext: SharedGovernanceContext,
+  userContext?: UserGovernanceContext,
 ): Promise<EnrichedProposal> {
   const client = getBlockchainClient();
   const proposalId = BigInt(record.proposalId);
 
-  const rawState = (await client.readContract({
-    address: MY_GOVERNOR_ADDRESS,
-    abi: governorAbi,
-    functionName: "state",
-    args: [proposalId],
-  })) as number;
+  const [rawState, snapshot, deadline, eta, needsQueuing, voteTotals] =
+    await withRpcRetry(async () => {
+      const results = await client.multicall({
+        contracts: [
+          {
+            address: MY_GOVERNOR_ADDRESS,
+            abi: governorAbi,
+            functionName: "state",
+            args: [proposalId],
+          },
+          {
+            address: MY_GOVERNOR_ADDRESS,
+            abi: governorAbi,
+            functionName: "proposalSnapshot",
+            args: [proposalId],
+          },
+          {
+            address: MY_GOVERNOR_ADDRESS,
+            abi: governorAbi,
+            functionName: "proposalDeadline",
+            args: [proposalId],
+          },
+          {
+            address: MY_GOVERNOR_ADDRESS,
+            abi: governorAbi,
+            functionName: "proposalEta",
+            args: [proposalId],
+          },
+          {
+            address: MY_GOVERNOR_ADDRESS,
+            abi: governorAbi,
+            functionName: "proposalNeedsQueuing",
+            args: [proposalId],
+          },
+          {
+            address: MY_GOVERNOR_ADDRESS,
+            abi: governorAbi,
+            functionName: "proposalVotes",
+            args: [proposalId],
+          },
+        ],
+        allowFailure: false,
+      });
 
-  const snapshot = (await client.readContract({
-    address: MY_GOVERNOR_ADDRESS,
-    abi: governorAbi,
-    functionName: "proposalSnapshot",
-    args: [proposalId],
-  })) as bigint;
-
-  const deadline = (await client.readContract({
-    address: MY_GOVERNOR_ADDRESS,
-    abi: governorAbi,
-    functionName: "proposalDeadline",
-    args: [proposalId],
-  })) as bigint;
-
-  const eta = (await client.readContract({
-    address: MY_GOVERNOR_ADDRESS,
-    abi: governorAbi,
-    functionName: "proposalEta",
-    args: [proposalId],
-  })) as bigint;
-
-  const needsQueuing = (await client.readContract({
-    address: MY_GOVERNOR_ADDRESS,
-    abi: governorAbi,
-    functionName: "proposalNeedsQueuing",
-    args: [proposalId],
-  })) as boolean;
-
-  const voteTotals = (await client.readContract({
-    address: MY_GOVERNOR_ADDRESS,
-    abi: governorAbi,
-    functionName: "proposalVotes",
-    args: [proposalId],
-  })) as [bigint, bigint, bigint];
-
-  const clockModeRaw = (await client.readContract({
-    address: MY_GOVERNOR_ADDRESS,
-    abi: governorAbi,
-    functionName: "CLOCK_MODE",
-  })) as string;
-
-  const clockMode = detectClockMode(clockModeRaw);
-
-  const currentBlockNumber = await client.getBlockNumber();
-  const currentBlock = await client.getBlock({
-    blockNumber: currentBlockNumber,
-  });
-  const currentBlockTimestampSeconds = currentBlock.timestamp;
+      return results as [
+        number,
+        bigint,
+        bigint,
+        bigint,
+        boolean,
+        [bigint, bigint, bigint],
+      ];
+    });
 
   const governorState = mapGovernorState(rawState);
   const status = governorStateToProposalStatus(governorState);
@@ -362,53 +478,33 @@ async function enrichProposal(
   let userVotingPower = BigInt(0);
   let needsDelegation = false;
 
-  if (currentUserWallet) {
-    const voter = currentUserWallet as Address;
+  if (userContext?.voterContext) {
+    const { voter, delegatee, currentVotes, balance, tokenClock } =
+      userContext.voterContext;
 
-    const hasUserVoted = (await client.readContract({
-      address: MY_GOVERNOR_ADDRESS,
-      abi: governorAbi,
-      functionName: "hasVoted",
-      args: [proposalId, voter],
-    })) as boolean;
-
-    const delegatee = (await client.readContract({
-      address: GOVERNANCE_TOKEN_ADDRESS,
-      abi: governanceTokenAbi,
-      functionName: "delegates",
-      args: [voter],
-    })) as Address;
-
-    const currentVotes = (await client.readContract({
-      address: GOVERNANCE_TOKEN_ADDRESS,
-      abi: governanceTokenAbi,
-      functionName: "getVotes",
-      args: [voter],
-    })) as bigint;
-
-    const balance = (await client.readContract({
-      address: GOVERNANCE_TOKEN_ADDRESS,
-      abi: governanceTokenAbi,
-      functionName: "balanceOf",
-      args: [voter],
-    })) as bigint;
-
-    const tokenClock = (await client.readContract({
-      address: GOVERNANCE_TOKEN_ADDRESS,
-      abi: governanceTokenAbi,
-      functionName: "clock",
-    })) as bigint;
+    const hasUserVoted = await withRpcRetry(
+      () =>
+        client.readContract({
+          address: MY_GOVERNOR_ADDRESS,
+          abi: governorAbi,
+          functionName: "hasVoted",
+          args: [proposalId, voter],
+        }) as Promise<boolean>,
+    );
 
     let snapshotVotes = BigInt(0);
 
     if (snapshot <= tokenClock) {
       try {
-        snapshotVotes = (await client.readContract({
-          address: GOVERNANCE_TOKEN_ADDRESS,
-          abi: governanceTokenAbi,
-          functionName: "getPastVotes",
-          args: [voter, snapshot],
-        })) as bigint;
+        snapshotVotes = await withRpcRetry(
+          () =>
+            client.readContract({
+              address: GOVERNANCE_TOKEN_ADDRESS,
+              abi: governanceTokenAbi,
+              functionName: "getPastVotes",
+              args: [voter, snapshot],
+            }) as Promise<bigint>,
+        );
       } catch (error) {
         console.error("GET_PAST_VOTES_READ_ERROR", error);
         snapshotVotes = BigInt(0);
@@ -436,18 +532,18 @@ async function enrichProposal(
     ? formatReadableDate(record.votingStartsAt)
     : formatTimepointFromClockMode(
         snapshot,
-        clockMode,
-        currentBlockNumber,
-        currentBlockTimestampSeconds,
+        sharedContext.clockMode,
+        sharedContext.currentBlockNumber,
+        sharedContext.currentBlockTimestampSeconds,
       );
 
   const votingEndsAt = record.votingEndsAt
     ? formatReadableDate(record.votingEndsAt)
     : formatTimepointFromClockMode(
         deadline,
-        clockMode,
-        currentBlockNumber,
-        currentBlockTimestampSeconds,
+        sharedContext.clockMode,
+        sharedContext.currentBlockNumber,
+        sharedContext.currentBlockTimestampSeconds,
       );
 
   const executableAt = record.executableAt
@@ -590,8 +686,211 @@ function includeByFilter(
   return proposal.summary.status === filter;
 }
 
+function buildProposalTimeline(
+  proposal: ProposalDetail,
+): ProposalTimelineEvent[] {
+  const timeline: ProposalTimelineEvent[] = [
+    {
+      id: `${proposal.id}-created`,
+      title: "Proposal created",
+      description: "A new anonymous proposal was submitted for review.",
+      timestamp: proposal.createdAt,
+    },
+  ];
+
+  if (proposal.votingStartsAt) {
+    timeline.push({
+      id: `${proposal.id}-voting-starts`,
+      title: "Voting opens",
+      description:
+        "The voting window is now controlled by the onchain governor.",
+      timestamp: proposal.votingStartsAt,
+    });
+  }
+
+  if (proposal.votingEndsAt) {
+    timeline.push({
+      id: `${proposal.id}-voting-ends`,
+      title: "Voting closes",
+      description: "The onchain voting period ends at this point.",
+      timestamp: proposal.votingEndsAt,
+    });
+  }
+
+  if (proposal.queuedAt) {
+    timeline.push({
+      id: `${proposal.id}-queued`,
+      title: "Queued",
+      description: "The proposal is queued in the timelock path.",
+      timestamp: proposal.queuedAt,
+    });
+  }
+
+  if (proposal.executableAt) {
+    timeline.push({
+      id: `${proposal.id}-executable`,
+      title: "Executable",
+      description:
+        "The proposal can be executed once the timelock delay has passed.",
+      timestamp: proposal.executableAt,
+    });
+  }
+
+  return timeline;
+}
+
+async function getExecutableProposalsUncached(): Promise<ProposalSummary[]> {
+  const records = await getStoredProposalRecords();
+  const sharedContext = await buildSharedGovernanceContext();
+  const enriched: EnrichedProposal[] = [];
+
+  for (const record of records) {
+    try {
+      const proposal = await enrichProposal(record, sharedContext);
+      enriched.push(proposal);
+    } catch (error) {
+      console.error(
+        "GET_EXECUTABLE_PROPOSALS_ENRICH_ERROR",
+        record.proposalId,
+        error,
+      );
+    }
+  }
+
+  return enriched
+    .filter((proposal) => proposal.flags.canExecute)
+    .map((proposal) => proposal.summary);
+}
+
+async function getProposalsUncached(
+  filter: ProposalFilterOption = "all",
+): Promise<ProposalSummary[]> {
+  const records = await getStoredProposalRecords();
+  const [sharedContext, userContext] = await Promise.all([
+    buildSharedGovernanceContext(),
+    buildUserGovernanceContext(),
+  ]);
+
+  const enriched: EnrichedProposal[] = [];
+
+  for (const record of records) {
+    try {
+      const proposal = await enrichProposal(record, sharedContext, userContext);
+      enriched.push(proposal);
+    } catch (error) {
+      console.error("GET_PROPOSALS_ENRICH_ERROR", record.proposalId, error);
+    }
+  }
+
+  return enriched
+    .filter((proposal) => includeByFilter(proposal, filter))
+    .map((proposal) => proposal.summary);
+}
+
+async function getRecentGovernanceActivityUncached(
+  filter: "all" | "executed" = "all",
+): Promise<GovernanceActivityItem[]> {
+  const records = await getStoredProposalRecords();
+  const sharedContext = await buildSharedGovernanceContext();
+  const enriched: EnrichedProposal[] = [];
+
+  for (const record of records) {
+    try {
+      const proposal = await enrichProposal(record, sharedContext);
+      enriched.push(proposal);
+    } catch (error) {
+      console.error(
+        "RECENT_GOVERNANCE_ACTIVITY_ENRICH_ERROR",
+        record.proposalId,
+        error,
+      );
+    }
+  }
+
+  const filtered =
+    filter === "executed"
+      ? enriched.filter((item) => item.summary.status === "executed")
+      : enriched;
+
+  return filtered.map((item) => ({
+    id: `proposal-${item.summary.id}-${item.summary.status}`,
+    type: "proposal_created",
+    title: item.summary.title,
+    description: item.summary.statusLabel,
+    occurredAt: item.summary.createdAt,
+    relatedProposalId: item.summary.id,
+    relatedProposalCategory: item.summary.category,
+    tone: item.summary.statusTone,
+  }));
+}
+
+async function getRecentGovernanceActivityVotedForCurrentUser(): Promise<
+  GovernanceActivityItem[]
+> {
+  const currentUserWallet = await getCurrentUserWalletAddress();
+
+  if (!currentUserWallet) {
+    return [];
+  }
+
+  const records = await getStoredProposalRecords();
+  const [sharedContext, userContext] = await Promise.all([
+    buildSharedGovernanceContext(),
+    buildUserGovernanceContext(),
+  ]);
+
+  const enriched: EnrichedProposal[] = [];
+
+  for (const record of records) {
+    try {
+      const proposal = await enrichProposal(record, sharedContext, userContext);
+      enriched.push(proposal);
+    } catch (error) {
+      console.error(
+        "RECENT_GOVERNANCE_ACTIVITY_VOTED_ENRICH_ERROR",
+        record.proposalId,
+        error,
+      );
+    }
+  }
+
+  return enriched
+    .filter((item) => item.flags.hasVoted)
+    .map((item) => ({
+      id: `proposal-${item.summary.id}-voted`,
+      type: "proposal_created",
+      title: item.summary.title,
+      description: "You voted on this proposal",
+      occurredAt: item.summary.createdAt,
+      relatedProposalId: item.summary.id,
+      relatedProposalCategory: item.summary.category,
+      tone: "success" as const,
+    }));
+}
+
+const getExecutableProposalsCached = unstable_cache(
+  async () => getExecutableProposalsUncached(),
+  ["governance-executable-proposals"],
+  { revalidate: 15, tags: [GOVERNANCE_PROPOSALS_TAG] },
+);
+
+const getRecentGovernanceActivityCached = unstable_cache(
+  async (filter: "all" | "executed") =>
+    getRecentGovernanceActivityUncached(filter),
+  ["governance-recent-activity"],
+  { revalidate: 15, tags: [GOVERNANCE_PROPOSALS_TAG] },
+);
+
+export async function getExecutableProposals(): Promise<ProposalSummary[]> {
+  return getExecutableProposalsCached();
+}
+
 export async function getDashboardSummary(): Promise<DashboardSummary> {
-  const recentProposals = (await getProposals("all")).slice(0, 4);
+  const [recentProposals, protocolStatus, recentActivity] = await Promise.all([
+    getProposals("all").then((items) => items.slice(0, 4)),
+    getProtocolStatus(),
+    getRecentGovernanceActivity("all"),
+  ]);
 
   return {
     wallet: {
@@ -608,31 +907,16 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
       quorumReference: "Governor quorum at snapshot",
       shareOfQuorum: "Calculated per proposal",
     },
-    protocolStatus: await getProtocolStatus(),
+    protocolStatus,
     recentProposals,
-    recentActivity: await getRecentGovernanceActivity("all"),
+    recentActivity,
   };
 }
 
 export async function getProposals(
   filter: ProposalFilterOption = "all",
 ): Promise<ProposalSummary[]> {
-  const records = await getStoredProposalRecords();
-  const currentUserWallet = await getCurrentUserWalletAddress();
-  const enriched: EnrichedProposal[] = [];
-
-  for (const record of records) {
-    try {
-      const proposal = await enrichProposal(record, currentUserWallet);
-      enriched.push(proposal);
-    } catch (error) {
-      console.error("GET_PROPOSALS_ENRICH_ERROR", record.proposalId, error);
-    }
-  }
-
-  return enriched
-    .filter((proposal) => includeByFilter(proposal, filter))
-    .map((proposal) => proposal.summary);
+  return getProposalsUncached(filter);
 }
 
 export async function getProposalById(
@@ -673,8 +957,12 @@ export async function getProposalById(
     return null;
   }
 
-  const currentUserWallet = await getCurrentUserWalletAddress();
-  const enriched = await enrichProposal(record, currentUserWallet);
+  const [sharedContext, userContext] = await Promise.all([
+    buildSharedGovernanceContext(),
+    buildUserGovernanceContext(),
+  ]);
+
+  const enriched = await enrichProposal(record, sharedContext, userContext);
 
   return {
     ...enriched.summary,
@@ -741,94 +1029,19 @@ export async function getProposalTimeline(
     return [];
   }
 
-  const timeline: ProposalTimelineEvent[] = [
-    {
-      id: `${proposal.id}-created`,
-      title: "Proposal created",
-      description: "A new anonymous proposal was submitted for review.",
-      timestamp: proposal.createdAt,
-    },
-  ];
-
-  if (proposal.votingStartsAt) {
-    timeline.push({
-      id: `${proposal.id}-voting-starts`,
-      title: "Voting opens",
-      description:
-        "The voting window is now controlled by the onchain governor.",
-      timestamp: proposal.votingStartsAt,
-    });
-  }
-
-  if (proposal.votingEndsAt) {
-    timeline.push({
-      id: `${proposal.id}-voting-ends`,
-      title: "Voting closes",
-      description: "The onchain voting period ends at this point.",
-      timestamp: proposal.votingEndsAt,
-    });
-  }
-
-  if (proposal.queuedAt) {
-    timeline.push({
-      id: `${proposal.id}-queued`,
-      title: "Queued",
-      description: "The proposal is queued in the timelock path.",
-      timestamp: proposal.queuedAt,
-    });
-  }
-
-  if (proposal.executableAt) {
-    timeline.push({
-      id: `${proposal.id}-executable`,
-      title: "Executable",
-      description:
-        "The proposal can be executed once the timelock delay has passed.",
-      timestamp: proposal.executableAt,
-    });
-  }
-
-  return timeline;
+  return buildProposalTimeline(proposal);
 }
 
 export async function getRecentGovernanceActivity(
   filter: "all" | "voted" | "executed" = "all",
 ): Promise<GovernanceActivityItem[]> {
-  const records = await getStoredProposalRecords();
-  const currentUserWallet = await getCurrentUserWalletAddress();
-
-  const enriched: EnrichedProposal[] = [];
-
-  for (const record of records) {
-    try {
-      const proposal = await enrichProposal(record, currentUserWallet);
-      enriched.push(proposal);
-    } catch (error) {
-      console.error(
-        "RECENT_GOVERNANCE_ACTIVITY_ENRICH_ERROR",
-        record.proposalId,
-        error,
-      );
-    }
+  if (filter === "voted") {
+    return getRecentGovernanceActivityVotedForCurrentUser();
   }
 
-  const filtered =
-    filter === "voted"
-      ? enriched.filter((item) => item.flags.hasVoted)
-      : filter === "executed"
-      ? enriched.filter((item) => item.summary.status === "executed")
-      : enriched;
-
-  return filtered.map((item) => ({
-    id: `proposal-${item.summary.id}-${item.summary.status}`,
-    type: "proposal_created",
-    title: item.summary.title,
-    description: item.summary.statusLabel,
-    occurredAt: item.summary.createdAt,
-    relatedProposalId: item.summary.id,
-    relatedProposalCategory: item.summary.category,
-    tone: item.summary.statusTone,
-  }));
+  return getRecentGovernanceActivityCached(
+    filter === "executed" ? "executed" : "all",
+  );
 }
 
 export async function getProtocolStatus(): Promise<ProtocolStatusItem[]> {
