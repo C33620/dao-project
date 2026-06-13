@@ -24,7 +24,7 @@ export const appNav: AppNavItem[] = [
     description: "Items ready to be validated",
   },
   {
-    title: "History",
+    title: "Voted",
     href: "/app/history",
     description: "Items successfuly voted",
   },

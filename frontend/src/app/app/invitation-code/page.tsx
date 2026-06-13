@@ -1,16 +1,28 @@
 import { InvitationCodeCard } from "@/components/invites/invitation-code-card";
+import { getCurrentUser } from "@/lib/auth";
 import { getUserInviteCode } from "@/lib/invites/get-user-invite-code";
 
-async function loadInviteCode() {
+async function loadInvitationCodePageData() {
   try {
-    return await getUserInviteCode();
+    const [user, invite] = await Promise.all([
+      getCurrentUser(),
+      getUserInviteCode(),
+    ]);
+
+    return {
+      invite,
+      isAdmin: user?.role === "admin",
+    };
   } catch {
-    return undefined;
+    return {
+      invite: undefined,
+      isAdmin: false,
+    };
   }
 }
 
 export default async function InvitationCodePage() {
-  const invite = await loadInviteCode();
+  const { invite, isAdmin } = await loadInvitationCodePageData();
   const hasLoadError = invite === undefined;
 
   return (
@@ -28,7 +40,7 @@ export default async function InvitationCodePage() {
             </div>
           </section>
         ) : (
-          <InvitationCodeCard invite={invite} />
+          <InvitationCodeCard invite={invite} isAdmin={isAdmin} />
         )}
       </div>
     </main>

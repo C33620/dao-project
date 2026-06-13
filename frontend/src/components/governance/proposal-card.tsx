@@ -7,11 +7,16 @@ import type { ProposalSummary, VoteSupport } from "@/types/governance";
 type ProposalCardProps = {
   proposal: ProposalSummary;
   onVoteClick?: (proposalId: string, support: VoteSupport) => void;
+  hasOptimisticVote?: boolean;
 };
 
-export function ProposalCard({ proposal, onVoteClick }: ProposalCardProps) {
+export function ProposalCard({
+  proposal,
+  onVoteClick,
+  hasOptimisticVote = false,
+}: ProposalCardProps) {
   const isActive = proposal.status === "active";
-  const hasAlreadyVoted = proposal.hasVoted;
+  const hasAlreadyVoted = proposal.hasVoted || hasOptimisticVote;
   const canVote = proposal.actionsLabel === "Vote available";
 
   const showVotedState = hasAlreadyVoted;

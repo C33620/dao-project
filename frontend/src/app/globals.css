@@ -140,6 +140,10 @@ main {
   transform: translateY(-1px);
 }
 
+.button-2:hover {
+  transform: translateY(-1px);
+}
+
 .button--primary {
   background: var(--primary);
   color: white;
@@ -208,6 +212,10 @@ main {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
   backdrop-filter: blur(12px);
+}
+
+.section-card-1 {
+  margin-top: 3rem;
 }
 
 .section-card__header {
@@ -2271,14 +2279,13 @@ main {
   display: grid;
   gap: 1rem;
 }
-
 .treasury-page-feedback {
-  position: sticky;
-  top: 0.75rem;
-  z-index: 19;
+  position: fixed;
+  top: 7rem;
+  z-index: 25;
   width: fit-content;
-  max-width: 100%;
-  margin-bottom: 0.15rem;
+  max-width: min(100%, 42rem);
+  margin-bottom: 0.5rem;
 }
 
 .treasury-page-feedback .status-badge__label {

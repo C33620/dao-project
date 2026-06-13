@@ -3,7 +3,8 @@
 import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import type { AppRole } from "@/config/nav";
-import { ReactNode, useState } from "react";
+import { usePathname } from "next/navigation";
+import { ReactNode, useEffect, useState } from "react";
 
 type AppShellLayoutProps = {
   children: ReactNode;
@@ -11,12 +12,68 @@ type AppShellLayoutProps = {
   adminPendingCount?: number;
 };
 
+type AdminPendingCountResponse = {
+  ok: boolean;
+  count?: number;
+};
+
 export function AppShellLayout({
   children,
   role,
   adminPendingCount = 0,
 }: AppShellLayoutProps) {
+  const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [liveAdminPendingCount, setLiveAdminPendingCount] =
+    useState(adminPendingCount);
+
+  const isAdminTreasuryPage = pathname === "/app/admin/treasury";
+  const displayedAdminPendingCount =
+    role === "admin" && isAdminTreasuryPage ? 0 : liveAdminPendingCount;
+
+  useEffect(() => {
+    if (role !== "admin") {
+      return;
+    }
+
+    let cancelled = false;
+    let intervalId: number | undefined;
+
+    async function refreshPendingCount() {
+      try {
+        const response = await fetch("/api/admin/pending-count", {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = (await response.json()) as AdminPendingCountResponse;
+
+        if (!cancelled && data.ok && typeof data.count === "number") {
+          setLiveAdminPendingCount(data.count);
+        }
+      } catch {
+        // Keep the last known count.
+      }
+    }
+
+    void refreshPendingCount();
+
+    if (!isAdminTreasuryPage) {
+      intervalId = window.setInterval(refreshPendingCount, 15000);
+    }
+
+    return () => {
+      cancelled = true;
+
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, [role, isAdminTreasuryPage]);
 
   return (
     <div className="app-shell">
@@ -24,7 +81,7 @@ export function AppShellLayout({
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         role={role}
-        adminPendingCount={adminPendingCount}
+        adminPendingCount={displayedAdminPendingCount}
       />
 
       <div className="app-shell__main">

@@ -35,6 +35,9 @@ export function ProposalList({
     useState<VoteSupport | null>(null);
   const [isLoadingVoteFlow, setIsLoadingVoteFlow] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [optimisticallyVotedIds, setOptimisticallyVotedIds] = useState<
+    Set<string>
+  >(new Set());
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
   async function handleVoteClick(proposalId: string, support: VoteSupport) {
@@ -82,6 +85,16 @@ export function ProposalList({
     setSelectedActionState(null);
     setPreselectedSupport(null);
     setLoadError(null);
+  }
+
+  function handleVoteSuccess(proposalId: string) {
+    setOptimisticallyVotedIds((current) => {
+      const next = new Set(current);
+      next.add(proposalId);
+      return next;
+    });
+
+    closeModal();
   }
 
   useEffect(() => {
@@ -135,6 +148,7 @@ export function ProposalList({
               key={proposal.id}
               proposal={proposal}
               onVoteClick={handleVoteClick}
+              hasOptimisticVote={optimisticallyVotedIds.has(proposal.id)}
             />
           ))}
         </div>
@@ -190,7 +204,7 @@ export function ProposalList({
                 key={`${selectedProposal.id}-${preselectedSupport ?? "none"}`}
                 proposal={selectedProposal}
                 initialActionState={selectedActionState}
-                onVoteSuccess={closeModal}
+                onVoteSuccess={handleVoteSuccess}
               />
             ) : null}
           </div>

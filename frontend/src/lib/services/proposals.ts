@@ -762,6 +762,29 @@ async function getExecutableProposalsUncached(): Promise<ProposalSummary[]> {
     .map((proposal) => proposal.summary);
 }
 
+async function getQueueableProposalsUncached(): Promise<ProposalSummary[]> {
+  const records = await getStoredProposalRecords();
+  const sharedContext = await buildSharedGovernanceContext();
+  const enriched: EnrichedProposal[] = [];
+
+  for (const record of records) {
+    try {
+      const proposal = await enrichProposal(record, sharedContext);
+      enriched.push(proposal);
+    } catch (error) {
+      console.error(
+        "GET_QUEUEABLE_PROPOSALS_ENRICH_ERROR",
+        record.proposalId,
+        error,
+      );
+    }
+  }
+
+  return enriched
+    .filter((proposal) => proposal.flags.canQueue)
+    .map((proposal) => proposal.summary);
+}
+
 async function getProposalsUncached(
   filter: ProposalFilterOption = "all",
 ): Promise<ProposalSummary[]> {
@@ -873,6 +896,16 @@ const getExecutableProposalsCached = unstable_cache(
   ["governance-executable-proposals"],
   { revalidate: 15, tags: [GOVERNANCE_PROPOSALS_TAG] },
 );
+
+const getQueueableProposalsCached = unstable_cache(
+  async () => getQueueableProposalsUncached(),
+  ["governance-queueable-proposals"],
+  { revalidate: 15, tags: [GOVERNANCE_PROPOSALS_TAG] },
+);
+
+export async function getQueueableProposals(): Promise<ProposalSummary[]> {
+  return getQueueableProposalsCached();
+}
 
 const getRecentGovernanceActivityCached = unstable_cache(
   async (filter: "all" | "executed") =>

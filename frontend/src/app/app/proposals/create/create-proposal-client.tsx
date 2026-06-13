@@ -598,12 +598,11 @@ export default function CreateProposalClient({
             successfully. It will appear in the proposals list in a pending
             state.
           </p>
-        </div>
-
-        <div className="dashboard-cta-card__actions">
-          <Link href={returnHref} className="button button--primary">
-            Back to previous page
-          </Link>
+          <div className="dashboard-cta-card__actions">
+            <Link href={returnHref} className="button button--primary">
+              Back to previous page
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -669,7 +668,7 @@ export default function CreateProposalClient({
               onChange={(event) => setProposalText(event.target.value)}
               rows={4}
               maxLength={160}
-              placeholder="Example: Workshop on Saturday 12 March"
+              placeholder="write a short and clear proposal title."
               style={{
                 padding: "12px 14px",
                 borderRadius: 12,
@@ -716,7 +715,7 @@ export default function CreateProposalClient({
 
           {showSubmissionWalletHelper ? (
             <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Action needed in wallet.
+              Action needed in confirmation modal.
             </p>
           ) : null}
 
@@ -728,7 +727,7 @@ export default function CreateProposalClient({
 
           {showSavingMetadataHelper ? (
             <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Saving proposal metadata.
+              Saving proposal details.
             </p>
           ) : null}
 
@@ -740,7 +739,7 @@ export default function CreateProposalClient({
 
           {governorTxHash ? (
             <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Governor transaction submitted.
+              Proposal submitted.
             </p>
           ) : null}
 
@@ -822,7 +821,7 @@ export default function CreateProposalClient({
               </h2>
               <p style={{ margin: 0, color: "rgba(15, 23, 42, 0.72)" }}>
                 Check everything here first. After you continue, we will ask you
-                to confirm in your wallet.
+                to confirm.
               </p>
             </div>
 
@@ -869,7 +868,7 @@ export default function CreateProposalClient({
 
             {showSubmissionWalletHelper ? (
               <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
-                Action needed in wallet.
+                Action needed in confirmation modal.
               </p>
             ) : null}
 
@@ -881,7 +880,7 @@ export default function CreateProposalClient({
 
             {showSavingMetadataHelper ? (
               <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
-                Saving proposal metadata.
+                Saving proposal details.
               </p>
             ) : null}
 

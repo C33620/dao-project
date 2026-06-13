@@ -1,6 +1,7 @@
 "use client";
 
 import type { UserInviteCodeView } from "@/lib/invites/get-user-invite-code";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 function getStatusVariant(status: NonNullable<UserInviteCodeView>["status"]) {
@@ -60,8 +61,19 @@ function formatDate(date: Date | null) {
   }).format(new Date(date));
 }
 
-export function InvitationCodeCard({ invite }: { invite: UserInviteCodeView }) {
+type InvitationCodeCardProps = {
+  invite: UserInviteCodeView;
+  isAdmin?: boolean;
+};
+
+export function InvitationCodeCard({
+  invite,
+  isAdmin = false,
+}: InvitationCodeCardProps) {
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
 
   async function handleCopy() {
     if (!invite || invite.status !== "AVAILABLE") {
@@ -77,13 +89,74 @@ export function InvitationCodeCard({ invite }: { invite: UserInviteCodeView }) {
     }
   }
 
+  async function handleGenerateNewCode() {
+    try {
+      setIsGenerating(true);
+      setGenerateError(null);
+
+      const response = await fetch("/api/invitation-code/regenerate", {
+        method: "POST",
+        cache: "no-store",
+      });
+
+      const data = (await response.json()) as {
+        ok: boolean;
+        error?: string;
+      };
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error ?? "Failed to generate a new invite code.");
+      }
+
+      router.refresh();
+    } catch (error) {
+      setGenerateError(
+        error instanceof Error
+          ? error.message
+          : "Failed to generate a new invite code.",
+      );
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
   if (!invite) {
     return (
       <section className="section-card">
         <div className="section-card__content">
-          <p className="section-card__description" style={{ margin: 0 }}>
-            No active invitation code is available right now.
-          </p>
+          <div style={{ display: "grid", gap: "1rem" }}>
+            <p className="section-card__description" style={{ margin: 0 }}>
+              No active invitation code is available right now.
+            </p>
+
+            {isAdmin ? (
+              <div
+                style={{
+                  display: "grid",
+                  gap: "0.75rem",
+                  justifyItems: "start",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={handleGenerateNewCode}
+                  disabled={isGenerating}
+                  className="button button--primary"
+                >
+                  {isGenerating ? "Generating..." : "Generate new code"}
+                </button>
+
+                {generateError ? (
+                  <p
+                    className="section-card__description"
+                    style={{ margin: 0, color: "var(--color-error)" }}
+                  >
+                    {generateError}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
         </div>
       </section>
     );
@@ -133,14 +206,34 @@ export function InvitationCodeCard({ invite }: { invite: UserInviteCodeView }) {
               {invite.code}
             </code>
 
-            <button
-              type="button"
-              onClick={handleCopy}
-              disabled={!canCopy}
-              className="button button--secondary"
+            <div
+              style={{
+                display: "flex",
+                gap: "0.75rem",
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
             >
-              {copied ? "Copied" : "Copy code"}
-            </button>
+              <button
+                type="button"
+                onClick={handleCopy}
+                disabled={!canCopy}
+                className="button button--secondary"
+              >
+                {copied ? "Copied" : "Copy code"}
+              </button>
+
+              {isAdmin ? (
+                <button
+                  type="button"
+                  onClick={handleGenerateNewCode}
+                  disabled={isGenerating}
+                  className="button button--primary"
+                >
+                  {isGenerating ? "Generating..." : "Generate new code"}
+                </button>
+              ) : null}
+            </div>
           </div>
 
           <p
@@ -150,6 +243,25 @@ export function InvitationCodeCard({ invite }: { invite: UserInviteCodeView }) {
             {getStatusMessage(invite.status)}
             {formattedDate ? ` Expires ${formattedDate}.` : ""}
           </p>
+
+          {isAdmin ? (
+            <p
+              className="section-card__description"
+              style={{ margin: 0, maxWidth: "none" }}
+            >
+              Generating a new code will revoke any other still-available code
+              you created.
+            </p>
+          ) : null}
+
+          {generateError ? (
+            <p
+              className="section-card__description"
+              style={{ margin: 0, color: "var(--color-error)" }}
+            >
+              {generateError}
+            </p>
+          ) : null}
         </div>
       </div>
     </section>

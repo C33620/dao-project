@@ -32,7 +32,7 @@ export default async function DashboardPage() {
           title="Create a proposal"
           description="Write a proposal for the group to review and vote on."
         >
-          <CreateProposalEntryCard origin="dashboard" description="" />
+          <CreateProposalEntryCard origin="proposals" description="" />
         </SectionCard>
 
         <div className="two-column-layout">

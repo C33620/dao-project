@@ -19,7 +19,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 type VoteActionCardProps = {
   proposal: ProposalDetail;
   initialActionState: ProposalActionState;
-  onVoteSuccess?: () => void;
+  onVoteSuccess?: (proposalId: string) => void;
 };
 
 function toGovernorSupport(support: VoteSupport): number {
@@ -287,7 +287,6 @@ export function VoteActionCard({
     startTransition(async () => {
       try {
         await submitVoteOnchain(proposal.id, selectedSupport);
-        await revalidateGovernanceCache();
 
         setActionState((current) => ({
           ...current,
@@ -309,11 +308,10 @@ export function VoteActionCard({
           },
         }));
 
-        router.refresh();
+        onVoteSuccess?.(proposal.id);
 
-        window.setTimeout(() => {
-          onVoteSuccess?.();
-        }, 800);
+        await revalidateGovernanceCache();
+        router.refresh();
       } catch (error) {
         const message =
           error instanceof Error

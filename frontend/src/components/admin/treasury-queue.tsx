@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type TreasuryQueueItem = {
   id: string;
@@ -160,6 +160,16 @@ export function TreasuryQueue({
     message: "",
   });
 
+  useEffect(() => {
+    if (!feedback.type) return;
+
+    const timeoutId = window.setTimeout(() => {
+      setFeedback({ type: null, message: "" });
+    }, 2000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [feedback.type, feedback.message]);
+
   async function handleCopy(value: string, label: string) {
     try {
       await navigator.clipboard.writeText(value);
@@ -299,7 +309,7 @@ export function TreasuryQueue({
         </div>
       ) : null}
 
-      <section className="section-card">
+      <section className="section-card section-card-1">
         <div className="section-card__header">
           <div>
             <h2 className="section-card__title">Pending</h2>

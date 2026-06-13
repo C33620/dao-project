@@ -23,8 +23,8 @@ const titles: Record<string, { title: string; subtitle: string }> = {
       "Track the items that are ready, or nearly ready, to move forward.",
   },
   "/app/history": {
-    title: "History",
-    subtitle: "Follow the most recent activity in a simple chronological view.",
+    title: "Voted",
+    subtitle: "Follow the most recent voted proposals.",
   },
   "/app/admin/treasury": {
     title: "Admin",

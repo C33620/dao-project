@@ -71,7 +71,7 @@ export function ExecuteActionCard({ proposal }: ExecuteActionCardProps) {
     "idle" | "submitting" | "success" | "error"
   >("idle");
   const [message, setMessage] = useState(
-    "Review the proposal details, then confirm execution in your wallet.",
+    "Confirm execution to validate the proposal.",
   );
   const [isPending, startTransition] = useTransition();
 
@@ -79,7 +79,7 @@ export function ExecuteActionCard({ proposal }: ExecuteActionCardProps) {
 
   function handleExecute() {
     setStatus("submitting");
-    setMessage("Confirm proposal execution in your wallet.");
+    setMessage("Confirm proposal execution...");
 
     startTransition(async () => {
       try {
@@ -111,7 +111,7 @@ export function ExecuteActionCard({ proposal }: ExecuteActionCardProps) {
       <div className="button-row">
         <button
           type="button"
-          className="button button--primary"
+          className="button-2 button--primary"
           disabled={disabled}
           onClick={handleExecute}
         >
