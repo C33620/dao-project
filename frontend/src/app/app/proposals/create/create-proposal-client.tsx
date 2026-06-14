@@ -29,6 +29,15 @@ import { useRouter } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { useReadContract } from "wagmi";
 
+type CreateProposalMode = "standard" | "cancel";
+
+type CancelTargetOption = {
+  proposalId: string;
+  title: string;
+  category: ProposalCategory;
+  executedAt?: string;
+};
+
 type CreateProposalClientProps = {
   origin: ProposalOrigin;
   walletAddress: `0x${string}` | null;
@@ -36,6 +45,8 @@ type CreateProposalClientProps = {
     isCheckingAccount: boolean;
     isAccountReadyFromAppState: boolean;
   };
+  mode?: CreateProposalMode;
+  cancelTargetOptions?: CancelTargetOption[];
 };
 
 type SubmissionStage =
@@ -178,6 +189,8 @@ export default function CreateProposalClient({
   origin,
   walletAddress,
   accountReadiness,
+  mode = "standard",
+  cancelTargetOptions = [],
 }: CreateProposalClientProps) {
   const router = useRouter();
   const accountAddress = walletAddress;
@@ -185,6 +198,8 @@ export default function CreateProposalClient({
   const [proposalText, setProposalText] = useState("");
   const [details, setDetails] = useState("");
   const [category, setCategory] = useState<ProposalCategory | "">("");
+  const [selectedCanceledProposalId, setSelectedCanceledProposalId] =
+    useState("");
   const [isReviewOpen, setIsReviewOpen] = useState(false);
   const [submissionStage, setSubmissionStage] =
     useState<SubmissionStage>("idle");
@@ -203,6 +218,7 @@ export default function CreateProposalClient({
   const createdProposalIdRef = useRef<bigint | null>(null);
 
   const returnHref = getProposalReturnHref(origin);
+  const proposalKind = mode === "cancel" ? "cancel" : "standard";
 
   const {
     data: proposalThreshold,
@@ -258,6 +274,17 @@ export default function CreateProposalClient({
       enabled: Boolean(accountAddress),
     },
   });
+
+  const selectedCanceledProposal = useMemo(
+    () =>
+      cancelTargetOptions.find(
+        (item) => item.proposalId === selectedCanceledProposalId,
+      ) ?? null,
+    [cancelTargetOptions, selectedCanceledProposalId],
+  );
+
+  const effectiveCategory =
+    mode === "cancel" ? selectedCanceledProposal?.category ?? "" : category;
 
   const proposalTitle = buildProposalTitle(proposalText);
   const proposalSummary = buildProposalSummary(details);
@@ -386,7 +413,10 @@ export default function CreateProposalClient({
 
     return {
       label: "Ready to create",
-      description: "Write your proposal, review it, and continue when ready.",
+      description:
+        mode === "cancel"
+          ? "Choose an executed proposal, explain the cancellation, and continue when ready."
+          : "Write your proposal, review it, and continue when ready.",
       canReview: true,
       needsDelegation: false,
     };
@@ -404,6 +434,7 @@ export default function CreateProposalClient({
     isLoadingVotes,
     isThresholdError,
     isVotesError,
+    mode,
     proposalThreshold,
     votes,
   ]);
@@ -418,7 +449,10 @@ export default function CreateProposalClient({
   }
 
   function handleOpenReview() {
-    if (!readinessState.canReview || !category) {
+    const hasRequiredSelection =
+      mode === "cancel" ? Boolean(selectedCanceledProposal) : Boolean(category);
+
+    if (!readinessState.canReview || !hasRequiredSelection) {
       return;
     }
 
@@ -471,7 +505,12 @@ export default function CreateProposalClient({
   }
 
   async function handleSubmitGovernorProposal() {
-    if (!accountAddress || !category) {
+    if (!accountAddress || !effectiveCategory) {
+      return;
+    }
+
+    if (mode === "cancel" && !selectedCanceledProposal) {
+      setSubmissionError("Select an executed proposal to cancel.");
       return;
     }
 
@@ -490,6 +529,7 @@ export default function CreateProposalClient({
       );
 
       console.log("PROPOSAL_DEBUG", {
+        proposalKind,
         proposalThreshold,
         balance,
         votes,
@@ -499,6 +539,7 @@ export default function CreateProposalClient({
         calldatas: action.calldatas,
         description: proposalDescription,
         descriptionHash: action.descriptionHash,
+        canceledProposalId: selectedCanceledProposal?.proposalId ?? null,
       });
 
       const governorTx = await governorContract.propose(
@@ -551,12 +592,19 @@ export default function CreateProposalClient({
           excerpt: proposalSummary || proposalTitle,
           description: proposalDescription,
           descriptionHash: action.descriptionHash,
-          category,
+          category: effectiveCategory,
           proposerAddress: accountAddress,
           governorTxHash: governorTx.hash ?? null,
           targets: action.targets,
           values: action.values.map((value) => value.toString()),
           calldatas: action.calldatas,
+          proposalKind,
+          canceledProposalId:
+            mode === "cancel"
+              ? selectedCanceledProposal?.proposalId ?? null
+              : null,
+          canceledProposalTitle:
+            mode === "cancel" ? selectedCanceledProposal?.title ?? null : null,
         }),
       });
 
@@ -612,8 +660,22 @@ export default function CreateProposalClient({
     delegationStage === "wallet" || delegationStage === "pending";
 
   const showSubmissionWalletHelper = submissionStage === "wallet-governor";
-
   const showSavingMetadataHelper = submissionStage === "saving-metadata";
+
+  const reviewHeading =
+    mode === "cancel" ? "Review cancellation proposal" : "Review your proposal";
+
+  const reviewButtonLabel = isSubmittingProposal
+    ? "Continuing..."
+    : "Accept and continue";
+
+  const isReviewDisabled =
+    !readinessState.canReview ||
+    !effectiveCategory ||
+    proposalText.trim().length === 0 ||
+    isSubmittingProposal ||
+    isDelegationBusy ||
+    (mode === "cancel" && !selectedCanceledProposal);
 
   return (
     <>
@@ -621,7 +683,11 @@ export default function CreateProposalClient({
         <div className="dashboard-cta-card">
           <div className="dashboard-cta-card__content">
             <p className="section-kicker">{readinessState.label}</p>
-            <h2 className="dashboard-cta-card__title">Create a proposal</h2>
+            <h2 className="dashboard-cta-card__title">
+              {mode === "cancel"
+                ? "Create a cancellation proposal"
+                : "Create a proposal"}
+            </h2>
             <p className="dashboard-cta-card__description">
               {readinessState.description}
             </p>
@@ -634,41 +700,106 @@ export default function CreateProposalClient({
             gap: 16,
           }}
         >
-          <label style={{ display: "grid", gap: 8 }}>
-            <span style={{ fontWeight: 600 }}>Category</span>
-            <select
-              value={category}
-              onChange={(event) =>
-                setCategory(event.target.value as ProposalCategory | "")
-              }
-              required
+          {mode === "cancel" ? (
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>
+                Executed proposal to cancel
+              </span>
+              <select
+                value={selectedCanceledProposalId}
+                onChange={(event) =>
+                  setSelectedCanceledProposalId(event.target.value)
+                }
+                required
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(15, 23, 42, 0.12)",
+                  background: "white",
+                  fontSize: 16,
+                }}
+              >
+                <option value="">Select an executed proposal</option>
+                {cancelTargetOptions.map((option) => (
+                  <option key={option.proposalId} value={option.proposalId}>
+                    {option.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Category</span>
+              <select
+                value={category}
+                onChange={(event) =>
+                  setCategory(event.target.value as ProposalCategory | "")
+                }
+                required
+                style={{
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(15, 23, 42, 0.12)",
+                  background: "white",
+                  fontSize: 16,
+                }}
+              >
+                <option value="">Select a category</option>
+                {PROPOSAL_CATEGORY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {mode === "cancel" && selectedCanceledProposal ? (
+            <div
               style={{
-                padding: "12px 14px",
-                borderRadius: 12,
-                border: "1px solid rgba(15, 23, 42, 0.12)",
-                background: "white",
-                fontSize: 16,
+                display: "grid",
+                gap: 8,
+                padding: 16,
+                borderRadius: 16,
+                border: "1px solid rgba(155, 48, 72, 0.18)",
+                background: "rgba(250, 237, 241, 0.72)",
               }}
             >
-              <option value="">Select a category</option>
-              {PROPOSAL_CATEGORY_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              <p
+                className="section-kicker"
+                style={{ margin: 0, color: "rgb(155, 48, 72)" }}
+              >
+                Selected proposal
+              </p>
+              <p style={{ margin: 0, fontWeight: 700 }}>
+                {selectedCanceledProposal.title}
+              </p>
+              <p style={{ margin: 0, color: "rgba(15, 23, 42, 0.72)" }}>
+                Category:{" "}
+                {getProposalCategoryLabel(selectedCanceledProposal.category)}
+                {selectedCanceledProposal.executedAt
+                  ? ` · Executed ${selectedCanceledProposal.executedAt}`
+                  : ""}
+              </p>
+            </div>
+          ) : null}
 
           <label style={{ display: "grid", gap: 8 }}>
             <span style={{ fontWeight: 600 }}>
-              What would you like the group to consider?
+              {mode === "cancel"
+                ? "Why should the group cancel this proposal?"
+                : "What would you like the group to consider?"}
             </span>
             <textarea
               value={proposalText}
               onChange={(event) => setProposalText(event.target.value)}
               rows={4}
               maxLength={160}
-              placeholder="write a short and clear proposal title."
+              placeholder={
+                mode === "cancel"
+                  ? "Write a short and clear cancellation title."
+                  : "Write a short and clear proposal title."
+              }
               style={{
                 padding: "12px 14px",
                 borderRadius: 12,
@@ -687,7 +818,11 @@ export default function CreateProposalClient({
               onChange={(event) => setDetails(event.target.value)}
               rows={5}
               maxLength={1000}
-              placeholder="Add any context that would help the group understand this proposal."
+              placeholder={
+                mode === "cancel"
+                  ? "Add context that explains why this executed proposal should be canceled."
+                  : "Add any context that would help the group understand this proposal."
+              }
               style={{
                 padding: "12px 14px",
                 borderRadius: 12,
@@ -770,13 +905,7 @@ export default function CreateProposalClient({
                 type="button"
                 className="button button--primary"
                 onClick={handleOpenReview}
-                disabled={
-                  !readinessState.canReview ||
-                  !category ||
-                  proposalText.trim().length === 0 ||
-                  isSubmittingProposal ||
-                  isDelegationBusy
-                }
+                disabled={isReviewDisabled}
               >
                 Review proposal
               </button>
@@ -817,7 +946,7 @@ export default function CreateProposalClient({
                 Review
               </p>
               <h2 id="proposal-review-title" style={{ margin: 0 }}>
-                Review your proposal
+                {reviewHeading}
               </h2>
               <p style={{ margin: 0, color: "rgba(15, 23, 42, 0.72)" }}>
                 Check everything here first. After you continue, we will ask you
@@ -831,7 +960,10 @@ export default function CreateProposalClient({
                 gap: 12,
                 padding: 16,
                 borderRadius: 16,
-                background: "rgba(15, 23, 42, 0.04)",
+                background:
+                  mode === "cancel"
+                    ? "rgba(250, 237, 241, 0.72)"
+                    : "rgba(15, 23, 42, 0.04)",
               }}
             >
               <div>
@@ -839,9 +971,22 @@ export default function CreateProposalClient({
                   Category
                 </p>
                 <p style={{ fontWeight: 600, margin: 0 }}>
-                  {category ? getProposalCategoryLabel(category) : ""}
+                  {effectiveCategory
+                    ? getProposalCategoryLabel(effectiveCategory)
+                    : ""}
                 </p>
               </div>
+
+              {mode === "cancel" && selectedCanceledProposal ? (
+                <div>
+                  <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
+                    Executed proposal to cancel
+                  </p>
+                  <p style={{ fontWeight: 600, margin: 0 }}>
+                    {selectedCanceledProposal.title}
+                  </p>
+                </div>
+              ) : null}
 
               <div>
                 <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
@@ -907,9 +1052,9 @@ export default function CreateProposalClient({
                 onClick={() => {
                   void handleSubmitGovernorProposal();
                 }}
-                disabled={isSubmittingProposal || !category}
+                disabled={isSubmittingProposal || !effectiveCategory}
               >
-                {isSubmittingProposal ? "Continuing..." : "Accept and continue"}
+                {reviewButtonLabel}
               </button>
             </div>
           </div>

@@ -813,8 +813,8 @@ main {
 .activity-preview-item {
   padding: 0.95rem 1rem;
   border-radius: 1rem;
-  background: var(--surface-subtle);
-  border: 1px solid var(--border);
+  background: rgba(189, 249, 184, 0.6);
+  border: 1px solid #e1efdf;
 }
 
 .activity-preview-item h3 {
@@ -971,6 +971,18 @@ main {
   .proposal-card__vote-actions {
     grid-template-columns: 1fr;
   }
+
+  .action-panel__row--queue {
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+
+  .action-panel__row--queue span,
+  .action-panel__row--queue .action-panel__status-message {
+    width: 100%;
+    text-align: left;
+  }
 }
 
 .proposal-card__meta dt {
@@ -1007,6 +1019,43 @@ main {
 
 .proposal-card__link:hover {
   color: var(--info);
+}
+
+.proposal-card--cancel {
+  border-color: rgba(155, 48, 72, 0.2);
+  background: rgba(250, 237, 241, 0.72);
+}
+
+.proposal-card--cancel .proposal-card__content-panel {
+  background: rgba(250, 237, 241, 0.52);
+  border-color: rgba(155, 48, 72, 0.16);
+}
+
+.proposal-card--cancel .proposal-card__category {
+  color: var(--danger);
+}
+
+.proposal-card__category--cancel {
+  color: var(--danger);
+}
+
+.proposal-card__content-panel--cancel {
+  border-color: rgba(155, 48, 72, 0.18);
+  background: rgba(250, 237, 241, 0.72);
+}
+
+.proposal-card__meta--cancel dt,
+.proposal-card__meta--cancel dd {
+  color: var(--danger);
+}
+
+.proposal-card__helper--cancel-target {
+  margin-top: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  border: 1px solid rgba(155, 48, 72, 0.14);
+  border-radius: 0.875rem;
+  background: rgba(250, 237, 241, 0.72);
+  color: #7f2940;
 }
 
 .toolbar-card {
@@ -1218,7 +1267,8 @@ main {
 }
 
 .execution-item--stacked {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 0.9rem;
   padding: 1rem;
   border-radius: 1rem;
@@ -1228,6 +1278,7 @@ main {
 
 .execution-item__topline {
   display: flex;
+  width: 100%;
   justify-content: space-between;
   align-items: flex-start;
   gap: 1rem;
@@ -1295,7 +1346,7 @@ main {
   width: 0.7rem;
   height: 0.7rem;
   border-radius: 999px;
-  background: var(--foreground);
+  background: rgb(23, 252, 2);
   margin-top: 0.45rem;
   opacity: 0.16;
 }
@@ -1303,8 +1354,8 @@ main {
 .activity-feed__content {
   padding: 0.95rem 1rem;
   border-radius: 1rem;
-  border: 1px solid var(--border);
-  background: var(--surface-subtle);
+  border: 1px solid #e1efdf;
+  background: rgba(189, 249, 184, 0.6);
 }
 
 .activity-feed__topline {
@@ -2701,4 +2752,100 @@ main {
   background: var(--color-notification, #a13544);
   color: white;
   flex-shrink: 0;
+}
+
+.action-panel--queue {
+  width: 100%;
+}
+
+.action-panel__row--queue {
+  width: 100%;
+  align-items: center;
+}
+
+.action-panel__row--queue span {
+  flex: 0 0 auto;
+}
+
+.action-panel__row--queue .action-panel__status-message {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
+.action-panel__actions {
+  width: 100%;
+}
+
+.action-panel__actions .button-2 {
+  width: 100%;
+}
+
+.action-panel__status-message--success {
+  color: var(--success);
+}
+
+.action-panel__status-message--error {
+  color: var(--danger);
+}
+
+.proposal-cardfooter .action-panel--queue {
+  width: 100%;
+}
+
+.action-panel--queue .action-panel__row--stacked {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  gap: 0.45rem;
+  justify-items: stretch;
+}
+
+.action-panel--queue .action-panel__row--stacked strong {
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+
+.action-panel--queue .action-panel__actions {
+  width: 100%;
+  min-width: 0;
+  display: block;
+}
+
+.action-panel--queue .action-panel__actions .button-2 {
+  display: inline-flex;
+  width: 100%;
+  max-width: none;
+}
+
+.action-panel__status-message--success {
+  color: var(--success);
+}
+
+.action-panel__status-message--error {
+  color: var(--danger);
+}
+
+.proposal-card__action-slot {
+  width: 100%;
+  position: relative;
+  min-width: 0;
+  display: block;
+}
+
+.proposal-card__action-slot > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.action-panel__row--queue-label-right span {
+  order: 2;
+  text-align: right;
+}
+
+.action-panel__row--queue-label-right .action-panel__status-message {
+  order: 1;
 }

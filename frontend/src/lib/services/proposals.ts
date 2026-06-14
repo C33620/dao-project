@@ -30,6 +30,8 @@ export type ProposalTimelineEvent = {
   timestamp: string;
 };
 
+type ProposalKind = "standard" | "cancel";
+
 type GovernorState =
   | "pending"
   | "active"
@@ -58,6 +60,17 @@ type EnrichedProposal = {
     needsDelegation: boolean;
     userVotingPower: bigint;
     snapshotBlock: bigint | null;
+    isCancellationProposal: boolean;
+    isCanceledTarget: boolean;
+    shouldHideFromPrimaryLists: boolean;
+  };
+  raw: {
+    proposalKind: ProposalKind;
+    canceledProposalId: string | null;
+    canceledProposalTitle: string | null;
+    cancelHighlightUntil: Date | null;
+    cancelHiddenAt: Date | null;
+    executedAt: Date | null;
   };
 };
 
@@ -81,7 +94,6 @@ type UserGovernanceContext = {
 };
 
 const ESTIMATED_BLOCK_TIME_SECONDS = BigInt(12);
-
 export const GOVERNANCE_PROPOSALS_TAG = "governance-proposals";
 
 function mapGovernorState(value: number): GovernorState {
@@ -183,6 +195,12 @@ async function getStoredProposalRecords() {
       targets: true,
       values: true,
       calldatas: true,
+
+      proposalKind: true,
+      canceledProposalId: true,
+      canceledProposalTitle: true,
+      cancelHighlightUntil: true,
+      cancelHiddenAt: true,
     },
   });
 }
@@ -286,6 +304,50 @@ function safeJsonStringArray(value: unknown): string[] | null {
   }
 
   return value;
+}
+
+function isVisibleInPrimaryLists(proposal: EnrichedProposal) {
+  return !proposal.flags.shouldHideFromPrimaryLists;
+}
+
+function isExecutedCancellation(summary: ProposalSummary) {
+  return summary.kind === "cancel" && summary.status === "executed";
+}
+
+function buildCancellationTargetStateMap(enriched: EnrichedProposal[]) {
+  const map = new Map<
+    string,
+    {
+      canceledByProposalId: string;
+      canceledByTitle: string;
+      canceledByStatus: string;
+    }
+  >();
+
+  for (const item of enriched) {
+    const summary = item.summary;
+
+    if (summary.kind !== "cancel") {
+      continue;
+    }
+
+    if (summary.status !== "executed") {
+      continue;
+    }
+
+    const targetProposalId = summary.canceledProposalId;
+    if (!targetProposalId) {
+      continue;
+    }
+
+    map.set(targetProposalId, {
+      canceledByProposalId: summary.id,
+      canceledByTitle: summary.title,
+      canceledByStatus: summary.status,
+    });
+  }
+
+  return map;
 }
 
 async function withRpcRetry<T>(
@@ -554,6 +616,15 @@ async function enrichProposal(
     ? formatReadableDate(record.queuedAt)
     : undefined;
 
+  const proposalKind: ProposalKind =
+    record.proposalKind === "cancel" ? "cancel" : "standard";
+
+  const isCancellationProposal = proposalKind === "cancel";
+  const isCanceledTarget = Boolean(
+    record.cancelHiddenAt || record.cancelHighlightUntil,
+  );
+  const shouldHideFromPrimaryLists = Boolean(record.cancelHiddenAt);
+
   const actionsLabel = canVote
     ? "Vote available"
     : canQueue
@@ -581,17 +652,37 @@ async function enrichProposal(
     executableAt,
     actionsLabel,
     hasVoted,
+
+    kind: proposalKind,
+    canceledProposalId: record.canceledProposalId ?? undefined,
+    canceledProposalTitle: record.canceledProposalTitle ?? undefined,
+    cancelHighlightUntil: record.cancelHighlightUntil
+      ? formatReadableDate(record.cancelHighlightUntil)
+      : undefined,
+    cancelVisibilityState: record.cancelHiddenAt ? "hidden" : "visible",
   };
 
   const timeline: ProposalDetail["timeline"] = [
     {
       stage: "drafted",
-      label: "Proposal created",
+      label: isCancellationProposal
+        ? "Cancellation proposal created"
+        : "Proposal created",
       date: formatReadableDate(record.createdAt),
       complete: true,
       current: governorState === "pending",
     },
   ];
+
+  if (isCancellationProposal && record.canceledProposalTitle) {
+    timeline.push({
+      stage: "drafted",
+      label: `Targets executed proposal: ${record.canceledProposalTitle}`,
+      date: formatReadableDate(record.createdAt),
+      complete: true,
+      current: false,
+    });
+  }
 
   if (votingStartsAt) {
     timeline.push({
@@ -640,6 +731,28 @@ async function enrichProposal(
     });
   }
 
+  if (record.cancelHighlightUntil) {
+    timeline.push({
+      stage: "executed",
+      label: `Cancellation highlight until ${formatReadableDate(
+        record.cancelHighlightUntil,
+      )}`,
+      date: formatReadableDate(record.cancelHighlightUntil),
+      complete: true,
+      current: !record.cancelHiddenAt,
+    });
+  }
+
+  if (record.cancelHiddenAt) {
+    timeline.push({
+      stage: "executed",
+      label: "Hidden from primary proposal lists",
+      date: formatReadableDate(record.cancelHiddenAt),
+      complete: true,
+      current: false,
+    });
+  }
+
   return {
     summary,
     detailVotes: {
@@ -663,6 +776,17 @@ async function enrichProposal(
       needsDelegation,
       userVotingPower,
       snapshotBlock: snapshot,
+      isCancellationProposal,
+      isCanceledTarget,
+      shouldHideFromPrimaryLists,
+    },
+    raw: {
+      proposalKind,
+      canceledProposalId: record.canceledProposalId,
+      canceledProposalTitle: record.canceledProposalTitle,
+      cancelHighlightUntil: record.cancelHighlightUntil,
+      cancelHiddenAt: record.cancelHiddenAt,
+      executedAt: record.executedAt,
     },
   };
 }
@@ -671,6 +795,10 @@ function includeByFilter(
   proposal: EnrichedProposal,
   filter: ProposalFilterOption,
 ) {
+  if (!isVisibleInPrimaryLists(proposal)) {
+    return false;
+  }
+
   if (filter === "all") {
     return true;
   }
@@ -692,11 +820,26 @@ function buildProposalTimeline(
   const timeline: ProposalTimelineEvent[] = [
     {
       id: `${proposal.id}-created`,
-      title: "Proposal created",
-      description: "A new anonymous proposal was submitted for review.",
+      title:
+        proposal.kind === "cancel"
+          ? "Cancellation proposal created"
+          : "Proposal created",
+      description:
+        proposal.kind === "cancel"
+          ? "A cancellation proposal was submitted for review."
+          : "A new anonymous proposal was submitted for review.",
       timestamp: proposal.createdAt,
     },
   ];
+
+  if (proposal.kind === "cancel" && proposal.canceledProposalTitle) {
+    timeline.push({
+      id: `${proposal.id}-cancel-target`,
+      title: "Target selected",
+      description: `This proposal targets ${proposal.canceledProposalTitle}.`,
+      timestamp: proposal.createdAt,
+    });
+  }
 
   if (proposal.votingStartsAt) {
     timeline.push({
@@ -736,6 +879,16 @@ function buildProposalTimeline(
     });
   }
 
+  if (proposal.cancelHighlightUntil) {
+    timeline.push({
+      id: `${proposal.id}-cancel-highlight`,
+      title: "Highlight window",
+      description:
+        "The canceled target can remain visibly highlighted for a limited period.",
+      timestamp: proposal.cancelHighlightUntil,
+    });
+  }
+
   return timeline;
 }
 
@@ -758,6 +911,7 @@ async function getExecutableProposalsUncached(): Promise<ProposalSummary[]> {
   }
 
   return enriched
+    .filter(isVisibleInPrimaryLists)
     .filter((proposal) => proposal.flags.canExecute)
     .map((proposal) => proposal.summary);
 }
@@ -781,6 +935,7 @@ async function getQueueableProposalsUncached(): Promise<ProposalSummary[]> {
   }
 
   return enriched
+    .filter(isVisibleInPrimaryLists)
     .filter((proposal) => proposal.flags.canQueue)
     .map((proposal) => proposal.summary);
 }
@@ -830,21 +985,36 @@ async function getRecentGovernanceActivityUncached(
     }
   }
 
+  const cancellationTargetState = buildCancellationTargetStateMap(enriched);
+
   const filtered =
     filter === "executed"
-      ? enriched.filter((item) => item.summary.status === "executed")
+      ? enriched.filter(
+          (item) =>
+            item.summary.status === "executed" ||
+            isExecutedCancellation(item.summary),
+        )
       : enriched;
 
-  return filtered.map((item) => ({
-    id: `proposal-${item.summary.id}-${item.summary.status}`,
-    type: "proposal_created",
-    title: item.summary.title,
-    description: item.summary.statusLabel,
-    occurredAt: item.summary.createdAt,
-    relatedProposalId: item.summary.id,
-    relatedProposalCategory: item.summary.category,
-    tone: item.summary.statusTone,
-  }));
+  return filtered.map((item) => {
+    const cancellationInfo = cancellationTargetState.get(item.summary.id);
+
+    return {
+      id: `proposal-${item.summary.id}-${item.summary.status}`,
+      type:
+        item.summary.kind === "cancel"
+          ? "proposal_created"
+          : "proposal_created",
+      title: item.summary.title,
+      description: cancellationInfo
+        ? `Canceled by ${cancellationInfo.canceledByTitle}`
+        : item.summary.statusLabel,
+      occurredAt: item.summary.createdAt,
+      relatedProposalId: item.summary.id,
+      relatedProposalCategory: item.summary.category,
+      tone: cancellationInfo ? "danger" : item.summary.statusTone,
+    };
+  });
 }
 
 async function getRecentGovernanceActivityVotedForCurrentUser(): Promise<
@@ -878,16 +1048,20 @@ async function getRecentGovernanceActivityVotedForCurrentUser(): Promise<
   }
 
   return enriched
+    .filter(isVisibleInPrimaryLists)
     .filter((item) => item.flags.hasVoted)
     .map((item) => ({
       id: `proposal-${item.summary.id}-voted`,
       type: "proposal_created",
       title: item.summary.title,
-      description: "You voted on this proposal",
+      description:
+        item.summary.kind === "cancel"
+          ? "You voted on this cancellation proposal"
+          : "You voted on this proposal",
       occurredAt: item.summary.createdAt,
       relatedProposalId: item.summary.id,
       relatedProposalCategory: item.summary.category,
-      tone: "success" as const,
+      tone: item.summary.kind === "cancel" ? "danger" : ("success" as const),
     }));
 }
 
@@ -983,6 +1157,12 @@ export async function getProposalById(
       targets: true,
       values: true,
       calldatas: true,
+
+      proposalKind: true,
+      canceledProposalId: true,
+      canceledProposalTitle: true,
+      cancelHighlightUntil: true,
+      cancelHiddenAt: true,
     },
   });
 
@@ -1001,7 +1181,10 @@ export async function getProposalById(
     ...enriched.summary,
     description: enriched.descriptionParagraphs,
     tags: [getProposalCategoryLabel(record.category)],
-    contractSummary: "Governor lifecycle and vote status are read onchain.",
+    contractSummary:
+      enriched.summary.kind === "cancel"
+        ? "Governor lifecycle is read onchain. This entry is a cancellation proposal."
+        : "Governor lifecycle and vote status are read onchain.",
     votes: enriched.detailVotes,
     timeline: enriched.timeline,
     actionsLabel: enriched.actionsLabel,
@@ -1079,6 +1262,9 @@ export async function getRecentGovernanceActivity(
 
 export async function getProtocolStatus(): Promise<ProtocolStatusItem[]> {
   const proposals = await getStoredProposalRecords();
+  const cancellationCount = proposals.filter(
+    (item) => item.proposalKind === "cancel",
+  ).length;
 
   return [
     {
@@ -1098,6 +1284,13 @@ export async function getProtocolStatus(): Promise<ProtocolStatusItem[]> {
       helpText: "Shows how many proposal categories are represented so far.",
     },
     {
+      label: "Cancellation proposals",
+      value: `${cancellationCount} recorded`,
+      tone: cancellationCount > 0 ? "warning" : "default",
+      helpText:
+        "Tracks how many proposals were created to cancel executed items.",
+    },
+    {
       label: "Lifecycle source",
       value: "Onchain governor",
       tone: "success",
@@ -1105,4 +1298,17 @@ export async function getProtocolStatus(): Promise<ProtocolStatusItem[]> {
         "Proposal state, timing, and voting status are read from the governor contract.",
     },
   ];
+}
+
+export async function getCancelableExecutedProposals(): Promise<
+  ProposalSummary[]
+> {
+  const proposals = await getProposalsUncached("all");
+
+  return proposals.filter(
+    (proposal) =>
+      proposal.status === "executed" &&
+      proposal.kind !== "cancel" &&
+      proposal.cancelVisibilityState !== "hidden",
+  );
 }

@@ -282,39 +282,49 @@ model TreasuryAuditLog {
 }
 
 model ProposalRecord {
-  id              String            @id @default(auto()) @map("_id") @db.ObjectId
-  proposalId      String            @unique
-  title           String
-  excerpt         String
-  description     String
-  descriptionHash String?
-  category        ProposalCategory
-  proposerAddress String
-  proposerLabel   String
-  proposerUserId  String?           @db.ObjectId
-  proposerUser    User?             @relation(fields: [proposerUserId], references: [id], onDelete: SetNull)
-  governorAddress String
-  registryAddress String?
-  governorTxHash  String?
+  id                    String            @id @default(auto()) @map("_id") @db.ObjectId
+  proposalId            String            @unique
+  title                 String
+  excerpt               String
+  description           String
+  descriptionHash       String?
+  category              ProposalCategory
+  proposerAddress       String
+  proposerLabel         String
+  proposerUserId        String?           @db.ObjectId
+  proposerUser          User?             @relation(fields: [proposerUserId], references: [id], onDelete: SetNull)
+  governorAddress       String
+  registryAddress       String?
+  governorTxHash        String?
 
-  targets         Json?
-  values          Json?
-  calldatas       Json?
+  proposalKind          String?           // "standard" | "cancel"
+  canceledProposalId    String?
+  canceledProposalTitle String?
+  cancelHighlightUntil  DateTime?
+  cancelHiddenAt        DateTime?
 
-  votingStartsAt  DateTime?
-  votingEndsAt    DateTime?
-  queuedAt        DateTime?
-  executableAt    DateTime?
-  executedAt      DateTime?
-  canceledAt      DateTime?
-  defeatedAt      DateTime?
+  targets               Json?
+  values                Json?
+  calldatas             Json?
 
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  votingStartsAt        DateTime?
+  votingEndsAt          DateTime?
+  queuedAt              DateTime?
+  executableAt          DateTime?
+  executedAt            DateTime?
+  canceledAt            DateTime?
+  defeatedAt            DateTime?
+
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
   @@index([category, createdAt])
   @@index([createdAt])
   @@index([proposerUserId])
   @@index([proposalId, votingEndsAt])
   @@index([proposalId, executableAt])
+  @@index([proposalKind, createdAt])
+  @@index([canceledProposalId])
+  @@index([cancelHighlightUntil])
+  @@index([cancelHiddenAt])
 }

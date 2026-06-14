@@ -40,7 +40,7 @@ function getLatestVotedProposals<
 }
 
 export default async function LandingPage() {
-  const proposals = await getProposals("all");
+  const proposals = await getProposals("executed");
   const latestVotedProposals = getLatestVotedProposals(proposals);
   const activeUsersCount = await countUsers();
 

@@ -15,6 +15,7 @@ export function ProposalCard({
   onVoteClick,
   hasOptimisticVote = false,
 }: ProposalCardProps) {
+  const isCancelProposal = proposal.kind === "cancel";
   const isActive = proposal.status === "active";
   const hasAlreadyVoted = proposal.hasVoted || hasOptimisticVote;
   const canVote = proposal.actionsLabel === "Vote available";
@@ -29,18 +30,38 @@ export function ProposalCard({
   return (
     <article className="proposal-card">
       <div className="proposal-card__top">
-        <p className="proposal-card__category">
-          {getProposalCategoryLabel(proposal.category)}
+        <p
+          className={`proposal-card__category${
+            isCancelProposal ? " proposal-card__category--cancel" : ""
+          }`}
+        >
+          {isCancelProposal
+            ? "Cancel"
+            : getProposalCategoryLabel(proposal.category)}
         </p>
+
         <StatusBadge label={proposal.statusLabel} tone={proposal.statusTone} />
 
-        <div className="proposal-card__content-panel">
+        <div
+          className={`proposal-card__content-panel${
+            isCancelProposal ? " proposal-card__content-panel--cancel" : ""
+          }`}
+        >
           <h2 className="proposal-card__title">{proposal.title}</h2>
           <p className="proposal-card__excerpt">{proposal.excerpt}</p>
+          {isCancelProposal && proposal.canceledProposalTitle ? (
+            <p className="proposal-card__helper proposal-card__helper--cancel-target">
+              Targets executed proposal: {proposal.canceledProposalTitle}
+            </p>
+          ) : null}
         </div>
       </div>
 
-      <dl className="proposal-card__meta">
+      <dl
+        className={`proposal-card__meta${
+          isCancelProposal ? " proposal-card__meta--cancel" : ""
+        }`}
+      >
         <div>
           <dt>Created</dt>
           <dd>{proposal.createdAt}</dd>

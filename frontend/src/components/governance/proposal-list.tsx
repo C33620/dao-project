@@ -31,8 +31,7 @@ export function ProposalList({
     useState<ProposalDetail | null>(null);
   const [selectedActionState, setSelectedActionState] =
     useState<ProposalActionState | null>(null);
-  const [preselectedSupport, setPreselectedSupport] =
-    useState<VoteSupport | null>(null);
+
   const [isLoadingVoteFlow, setIsLoadingVoteFlow] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [optimisticallyVotedIds, setOptimisticallyVotedIds] = useState<
@@ -44,7 +43,7 @@ export function ProposalList({
     setIsModalOpen(true);
     setIsLoadingVoteFlow(true);
     setLoadError(null);
-    setPreselectedSupport(support);
+
     setSelectedProposal(null);
     setSelectedActionState(null);
 
@@ -83,7 +82,7 @@ export function ProposalList({
     setIsModalOpen(false);
     setSelectedProposal(null);
     setSelectedActionState(null);
-    setPreselectedSupport(null);
+
     setLoadError(null);
   }
 
@@ -93,7 +92,6 @@ export function ProposalList({
       next.add(proposalId);
       return next;
     });
-
     closeModal();
   }
 
@@ -201,7 +199,6 @@ export function ProposalList({
               </div>
             ) : selectedProposal && selectedActionState ? (
               <VoteActionCard
-                key={`${selectedProposal.id}-${preselectedSupport ?? "none"}`}
                 proposal={selectedProposal}
                 initialActionState={selectedActionState}
                 onVoteSuccess={handleVoteSuccess}

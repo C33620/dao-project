@@ -9,6 +9,7 @@ import { useState } from "react";
 
 type QueueActionCardProps = {
   proposal: ProposalSummary;
+  onQueued?: (proposalId: string) => void;
 };
 
 type QueuePayloadResponse = {
@@ -39,7 +40,7 @@ async function fetchQueuePayload(proposalId: string) {
   return data.payload;
 }
 
-export function QueueActionCard({ proposal }: QueueActionCardProps) {
+export function QueueActionCard({ proposal, onQueued }: QueueActionCardProps) {
   const [status, setStatus] = useState<
     "idle" | "submitting" | "submitted" | "success" | "error"
   >("idle");
@@ -49,8 +50,16 @@ export function QueueActionCard({ proposal }: QueueActionCardProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [hasSubmittedTx, setHasSubmittedTx] = useState(false);
 
-  const disabled =
-    isSubmitting || hasSubmittedTx || proposal.status !== "succeeded";
+  if (proposal.status !== "succeeded") {
+    return null;
+  }
+
+  const disabled = isSubmitting || hasSubmittedTx;
+
+  const buttonClassName =
+    status === "submitted" || status === "success"
+      ? "button-2 button--secondary"
+      : "button-2 button--primary";
 
   async function handleQueue() {
     try {
@@ -79,7 +88,7 @@ export function QueueActionCard({ proposal }: QueueActionCardProps) {
 
       setHasSubmittedTx(true);
       setStatus("submitted");
-      setMessage("Transaction submitted. Waiting for confirmation.");
+      setMessage("Queue submitted. Waiting for confirmation.");
       setIsSubmitting(false);
 
       const receipt = await tx.wait();
@@ -89,11 +98,11 @@ export function QueueActionCard({ proposal }: QueueActionCardProps) {
       }
 
       setStatus("success");
-      setMessage("Proposal queued successfully. Waiting for timelock.");
+      setMessage("Proposal queued successfully");
 
       window.setTimeout(() => {
-        window.location.reload();
-      }, 1200);
+        onQueued?.(proposal.id);
+      }, 300);
     } catch (error) {
       const nextMessage =
         error instanceof Error
@@ -108,38 +117,35 @@ export function QueueActionCard({ proposal }: QueueActionCardProps) {
   }
 
   return (
-    <div className="action-panel action-panel--interactive">
-      <div className="action-panel__row">
-        <span style={{ flexShrink: 0 }}>Queue status</span>
+    <div className="action-panel action-panel--interactive action-panel--queue">
+      <div className="action-panel__row action-panel__row--queue">
+        <span>Queue status</span>
         <strong
-          style={{
-            textAlign: "right",
-            color:
-              status === "success"
-                ? "var(--color-success)"
-                : status === "error"
-                ? "var(--color-error)"
-                : "inherit",
-          }}
+          className={`action-panel__status-message${
+            status === "success"
+              ? " action-panel__status-message--success"
+              : status === "error"
+              ? " action-panel__status-message--error"
+              : ""
+          }`}
         >
           {message}
         </strong>
       </div>
 
-      <div className="button-row" style={{ width: "100%" }}>
+      <div className="action-panel__actions">
         <button
           type="button"
-          className="button-2 button--primary"
-          style={{ width: "100%" }}
+          className={buttonClassName}
           disabled={disabled}
           onClick={handleQueue}
         >
           {isSubmitting
             ? "Queueing..."
             : status === "submitted"
-            ? "Transaction sent"
+            ? "Queue submitted"
             : status === "success"
-            ? "Queued"
+            ? "Proposal queued"
             : "Queue proposal"}
         </button>
       </div>

@@ -1,11 +1,13 @@
 import { getCurrentUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getProposals } from "@/lib/services/proposals";
 import { AccountSetupStatus, TreasuryDistributionStatus } from "@prisma/client";
 import CreateProposalClient from "./create-proposal-client";
 
 type CreateProposalPageProps = {
   searchParams?: Promise<{
     from?: string;
+    mode?: string;
   }>;
 };
 
@@ -63,11 +65,29 @@ export default async function CreateProposalPage({
       ? params.from
       : "proposals";
 
+  const mode = params?.mode === "cancel" ? "cancel" : "standard";
+
   const accountReadiness = await getAccountReadiness();
+
+  const proposals = mode === "cancel" ? await getProposals("all") : [];
+
+  const cancelTargetOptions =
+    mode === "cancel"
+      ? proposals
+          .filter((proposal) => proposal.status === "executed")
+          .map((proposal) => ({
+            proposalId: proposal.id,
+            title: proposal.title,
+            category: proposal.category,
+            executedAt: proposal.executedAt,
+          }))
+      : [];
 
   return (
     <CreateProposalClient
       origin={origin}
+      mode={mode}
+      cancelTargetOptions={cancelTargetOptions}
       accountReadiness={{
         isCheckingAccount: accountReadiness.isCheckingAccount,
         isAccountReadyFromAppState: accountReadiness.isAccountReadyFromAppState,

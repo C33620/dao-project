@@ -15,24 +15,61 @@ export default async function HistoryPage() {
         >
           <div className="activity-feed">
             {activity.length > 0 ? (
-              activity.map((item) => (
-                <article key={item.id} className="activity-feed__item">
-                  <div className="activity-feed__marker" aria-hidden="true" />
-                  <div className="activity-feed__content">
-                    <div className="activity-feed__topline">
-                      <h3>{item.title}</h3>
-                      <span>{item.occurredAt}</span>
+              activity.map((item) => {
+                const isDanger = item.tone === "danger";
+
+                return (
+                  <article
+                    key={item.id}
+                    className="activity-feed__item"
+                    style={
+                      isDanger
+                        ? {
+                            gridTemplateColumns: "16px 1fr",
+                          }
+                        : undefined
+                    }
+                  >
+                    <div
+                      className="activity-feed__marker"
+                      aria-hidden="true"
+                      style={
+                        isDanger
+                          ? {
+                              background: "var(--danger)",
+                              opacity: 0.9,
+                            }
+                          : undefined
+                      }
+                    />
+                    <div
+                      className="activity-feed__content"
+                      style={
+                        isDanger
+                          ? {
+                              borderColor: "rgba(185, 48, 72, 0.24)",
+                              background: "rgba(250, 237, 241, 0.62)",
+                            }
+                          : undefined
+                      }
+                    >
+                      <div className="activity-feed__topline">
+                        <h3>{item.title}</h3>
+                        <span>{item.occurredAt}</span>
+                      </div>
+                      <p>{item.description}</p>
+                      {item.relatedProposalCategory ? (
+                        <p>
+                          Category:{" "}
+                          {getProposalCategoryLabel(
+                            item.relatedProposalCategory,
+                          )}
+                        </p>
+                      ) : null}
                     </div>
-                    <p>{item.description}</p>
-                    {item.relatedProposalCategory ? (
-                      <p>
-                        Category:{" "}
-                        {getProposalCategoryLabel(item.relatedProposalCategory)}
-                      </p>
-                    ) : null}
-                  </div>
-                </article>
-              ))
+                  </article>
+                );
+              })
             ) : (
               <div className="empty-state empty-state--compact">
                 <div className="empty-state__icon" aria-hidden="true">

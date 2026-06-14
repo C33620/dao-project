@@ -14,13 +14,20 @@ import type {
 } from "@/types/governance";
 import { BrowserProvider, Contract } from "ethers";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type VoteActionCardProps = {
   proposal: ProposalDetail;
   initialActionState: ProposalActionState;
   onVoteSuccess?: (proposalId: string) => void;
 };
+
+type TxPhase =
+  | "idle"
+  | "awaiting_wallet"
+  | "pending_chain"
+  | "success"
+  | "error";
 
 function toGovernorSupport(support: VoteSupport): number {
   switch (support) {
@@ -47,7 +54,7 @@ async function revalidateGovernanceCache(): Promise<void> {
 async function submitVoteOnchain(
   proposalId: string,
   support: VoteSupport,
-): Promise<void> {
+): Promise<string> {
   const magic = getMagicClient();
   const provider = new BrowserProvider(magic.rpcProvider);
   const signer = await provider.getSigner();
@@ -63,14 +70,24 @@ async function submitVoteOnchain(
     toGovernorSupport(support),
   );
 
-  const receipt = await tx.wait();
+  if (!tx?.hash) {
+    throw new Error("Vote transaction was not created.");
+  }
+
+  return tx.hash;
+}
+
+async function waitForVoteReceipt(txHash: string): Promise<void> {
+  const magic = getMagicClient();
+  const provider = new BrowserProvider(magic.rpcProvider);
+  const receipt = await provider.waitForTransaction(txHash);
 
   if (!receipt) {
     throw new Error("Vote transaction receipt not found.");
   }
 }
 
-async function enableVotingPowerOnchain(): Promise<void> {
+async function enableVotingPowerOnchain(): Promise<string> {
   const magic = getMagicClient();
   const provider = new BrowserProvider(magic.rpcProvider);
   const signer = await provider.getSigner();
@@ -83,7 +100,18 @@ async function enableVotingPowerOnchain(): Promise<void> {
   );
 
   const tx = await governanceTokenContract.delegate(signerAddress);
-  const receipt = await tx.wait();
+
+  if (!tx?.hash) {
+    throw new Error("Delegation transaction was not created.");
+  }
+
+  return tx.hash;
+}
+
+async function waitForDelegationReceipt(txHash: string): Promise<void> {
+  const magic = getMagicClient();
+  const provider = new BrowserProvider(magic.rpcProvider);
+  const receipt = await provider.waitForTransaction(txHash);
 
   if (!receipt) {
     throw new Error("Delegation transaction receipt not found.");
@@ -141,6 +169,8 @@ export function VoteActionCard({
   const [selectedSupport] = useState<VoteSupport | undefined>(
     initialActionState.vote.selectedSupport,
   );
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [txPhase, setTxPhase] = useState<TxPhase>("idle");
 
   const selectedSupportLabel =
     selectedSupport === "for"
@@ -151,9 +181,6 @@ export function VoteActionCard({
       ? "Abstain"
       : null;
 
-  const [isPending, startTransition] = useTransition();
-  const [nowMs, setNowMs] = useState(() => Date.now());
-
   const needsDelegation = actionState.eligibility.reason === "delegated_away";
 
   const hasAlreadyVoted =
@@ -161,15 +188,21 @@ export function VoteActionCard({
     actionState.vote.status === "success" ||
     actionState.vote.existingVote !== undefined;
 
+  const isBusy = txPhase === "awaiting_wallet" || txPhase === "pending_chain";
+
   const buttonDisabled =
-    isPending ||
+    isBusy ||
     hasAlreadyVoted ||
     (!needsDelegation &&
       (!actionState.eligibility.canVote || !selectedSupport));
 
-  const buttonLabel = isPending
+  const buttonLabel = isBusy
     ? needsDelegation
-      ? "Enabling vote..."
+      ? txPhase === "awaiting_wallet"
+        ? "Confirm vote submission..."
+        : "Enabling vote..."
+      : txPhase === "awaiting_wallet"
+      ? "Confirm vote submission..."
       : "Submitting vote..."
     : hasAlreadyVoted
     ? "Voted"
@@ -202,7 +235,9 @@ export function VoteActionCard({
     return () => window.clearInterval(intervalId);
   }, [proposal.status, votingEndsDate]);
 
-  function handleEnableVote() {
+  async function handleEnableVote() {
+    setTxPhase("awaiting_wallet");
+
     setActionState((current) => ({
       ...current,
       vote: {
@@ -214,51 +249,65 @@ export function VoteActionCard({
       },
     }));
 
-    startTransition(async () => {
-      try {
-        await enableVotingPowerOnchain();
-        await revalidateGovernanceCache();
+    try {
+      const txHash = await enableVotingPowerOnchain();
 
-        setActionState((current) => ({
-          ...current,
-          eligibility: {
-            canVote: true,
-            title: "Voting enabled",
-            description:
-              "Your voting power has been enabled. You can now submit your vote.",
-          },
-          vote: {
-            ...current.vote,
-            status: "review",
-            submitLabel: "Submit vote",
-            feedbackTitle: "Voting enabled",
-            feedbackMessage:
-              "Your self-delegation was confirmed. Review your vote and submit.",
-          },
-        }));
+      setTxPhase("pending_chain");
+      setActionState((current) => ({
+        ...current,
+        vote: {
+          ...current.vote,
+          status: "submitting",
+          submitLabel: "Enabling vote...",
+          feedbackTitle: "Transaction submitted",
+          feedbackMessage: "Delegation submitted. Waiting for confirmation...",
+        },
+      }));
 
-        router.refresh();
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "We could not enable voting power.";
+      await waitForDelegationReceipt(txHash);
+      await revalidateGovernanceCache();
 
-        setActionState((current) => ({
-          ...current,
-          vote: {
-            ...current.vote,
-            status: "error",
-            submitLabel: "Enable vote",
-            feedbackTitle: "Enable vote failed",
-            feedbackMessage: message,
-          },
-        }));
-      }
-    });
+      setActionState((current) => ({
+        ...current,
+        eligibility: {
+          canVote: true,
+          title: "Voting enabled",
+          description:
+            "Your voting power has been enabled. You can now submit your vote.",
+        },
+        vote: {
+          ...current.vote,
+          status: "review",
+          submitLabel: "Submit vote",
+          feedbackTitle: "Voting enabled",
+          feedbackMessage:
+            "Your self-delegation was confirmed. Review your vote and submit.",
+        },
+      }));
+
+      setTxPhase("idle");
+      router.refresh();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "We could not enable voting power.";
+
+      setTxPhase("error");
+      setActionState((current) => ({
+        ...current,
+        vote: {
+          ...current.vote,
+          status: "error",
+          submitLabel: "Enable vote",
+          feedbackTitle: "Enable vote failed",
+          feedbackMessage: message,
+        },
+      }));
+    }
   }
 
-  function handleSubmitVote() {
+  async function handleSubmitVote() {
     if (!selectedSupport) {
       setActionState((current) => ({
         ...current,
@@ -266,11 +315,13 @@ export function VoteActionCard({
           ...current.vote,
           status: "error",
           feedbackTitle: "Selection required",
-          feedbackMessage: "Choose For or Against before submitting.",
+          feedbackMessage: "Choose Yes or No before submitting.",
         },
       }));
       return;
     }
+
+    setTxPhase("awaiting_wallet");
 
     setActionState((current) => ({
       ...current,
@@ -284,62 +335,77 @@ export function VoteActionCard({
       },
     }));
 
-    startTransition(async () => {
-      try {
-        await submitVoteOnchain(proposal.id, selectedSupport);
+    try {
+      const txHash = await submitVoteOnchain(proposal.id, selectedSupport);
 
-        setActionState((current) => ({
-          ...current,
-          summary: "Your vote has been submitted.",
-          eligibility: {
-            canVote: false,
-            reason: "already_voted",
-            title: "Vote submitted",
-            description:
-              "Your vote was confirmed and recorded for this proposal.",
-          },
-          vote: {
-            status: "success",
-            selectedSupport,
-            existingVote: selectedSupport,
-            submitLabel: "Voted",
-            feedbackTitle: "Vote recorded",
-            feedbackMessage: `Your ${selectedSupport} vote was submitted successfully.`,
-          },
-        }));
+      setTxPhase("pending_chain");
+      setActionState((current) => ({
+        ...current,
+        vote: {
+          ...current.vote,
+          status: "submitting",
+          selectedSupport,
+          submitLabel: "Submitting vote...",
+          feedbackTitle: "Transaction submitted",
+          feedbackMessage:
+            "Vote submitted. Waiting for onchain confirmation...",
+        },
+      }));
 
-        onVoteSuccess?.(proposal.id);
+      await waitForVoteReceipt(txHash);
 
-        await revalidateGovernanceCache();
-        router.refresh();
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "We could not submit your vote.";
+      setActionState((current) => ({
+        ...current,
+        summary: "Your vote has been submitted.",
+        eligibility: {
+          canVote: false,
+          reason: "already_voted",
+          title: "Vote submitted",
+          description:
+            "Your vote was confirmed and recorded for this proposal.",
+        },
+        vote: {
+          status: "success",
+          selectedSupport,
+          existingVote: selectedSupport,
+          submitLabel: "Voted",
+          feedbackTitle: "Vote recorded",
+          feedbackMessage: `Your ${selectedSupport} vote was submitted successfully.`,
+        },
+      }));
 
-        setActionState((current) => ({
-          ...current,
-          vote: {
-            ...current.vote,
-            status: "error",
-            selectedSupport,
-            submitLabel: "Try again",
-            feedbackTitle: "Vote failed",
-            feedbackMessage: message,
-          },
-        }));
-      }
-    });
+      await revalidateGovernanceCache();
+      router.refresh();
+      setTxPhase("idle");
+      onVoteSuccess?.(proposal.id);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "We could not submit your vote.";
+
+      setTxPhase("error");
+      setActionState((current) => ({
+        ...current,
+        vote: {
+          ...current.vote,
+          status: "error",
+          selectedSupport,
+          submitLabel: "Try again",
+          feedbackTitle: "Vote failed",
+          feedbackMessage: message,
+        },
+      }));
+    }
   }
 
   function handlePrimaryAction() {
     if (needsDelegation) {
-      handleEnableVote();
+      void handleEnableVote();
       return;
     }
 
-    handleSubmitVote();
+    void handleSubmitVote();
   }
 
   return (

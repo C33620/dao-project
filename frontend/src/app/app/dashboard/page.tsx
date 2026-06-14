@@ -1,3 +1,4 @@
+import { CancelProposalEntryCard } from "@/app/app/proposals/components/cancel-proposal-entry-card";
 import { CreateProposalEntryCard } from "@/app/app/proposals/components/create-proposal-entry-card";
 import { ProposalList } from "@/components/governance/proposal-list";
 import { PageShell } from "@/components/ui/page-shell";
@@ -32,7 +33,17 @@ export default async function DashboardPage() {
           title="Create a proposal"
           description="Write a proposal for the group to review and vote on."
         >
-          <CreateProposalEntryCard origin="proposals" description="" />
+          <div className="dashboard-section-stack">
+            <CreateProposalEntryCard origin="proposals" description="" />
+          </div>
+        </SectionCard>
+        <SectionCard
+          title="Cancel a proposal"
+          description="Cancel an existing proposal."
+        >
+          <div className="dashboard-section-stack">
+            <CancelProposalEntryCard origin="proposals" description="" />
+          </div>
         </SectionCard>
 
         <div className="two-column-layout">

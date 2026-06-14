@@ -51,6 +51,10 @@ export type ProposalTimelineItem = {
   current?: boolean;
 };
 
+export type ProposalKind = "standard" | "cancel";
+
+export type CancelVisibilityState = "visible" | "hidden";
+
 export type ProposalSummary = {
   id: string;
   slug?: string;
@@ -66,8 +70,15 @@ export type ProposalSummary = {
   votingEndsAt?: string;
   queuedAt?: string;
   executableAt?: string;
+  executedAt?: string;
   actionsLabel?: string;
   hasVoted: boolean;
+
+  kind?: ProposalKind;
+  canceledProposalId?: string;
+  canceledProposalTitle?: string;
+  cancelHighlightUntil?: string;
+  cancelVisibilityState?: CancelVisibilityState;
 };
 
 export type ProposalDetail = ProposalSummary & {

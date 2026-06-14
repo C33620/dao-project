@@ -9,6 +9,7 @@ import { useState, useTransition } from "react";
 
 type ExecuteActionCardProps = {
   proposal: ProposalSummary;
+  onExecuted?: (proposalId: string) => void;
 };
 
 type ExecutePayloadResponse = {
@@ -66,7 +67,10 @@ async function submitExecutionOnchain(proposalId: string) {
   }
 }
 
-export function ExecuteActionCard({ proposal }: ExecuteActionCardProps) {
+export function ExecuteActionCard({
+  proposal,
+  onExecuted,
+}: ExecuteActionCardProps) {
   const [status, setStatus] = useState<
     "idle" | "submitting" | "success" | "error"
   >("idle");
@@ -75,7 +79,16 @@ export function ExecuteActionCard({ proposal }: ExecuteActionCardProps) {
   );
   const [isPending, startTransition] = useTransition();
 
-  const disabled = isPending || proposal.status !== "queued";
+  if (proposal.status !== "queued") {
+    return null;
+  }
+
+  const disabled = isPending || status === "success";
+
+  const buttonClassName =
+    status === "success"
+      ? "button-2 button--secondary"
+      : "button-2 button--primary";
 
   function handleExecute() {
     setStatus("submitting");
@@ -86,9 +99,10 @@ export function ExecuteActionCard({ proposal }: ExecuteActionCardProps) {
         await submitExecutionOnchain(proposal.id);
         setStatus("success");
         setMessage("Proposal executed successfully.");
+
         window.setTimeout(() => {
-          window.location.reload();
-        }, 1200);
+          onExecuted?.(proposal.id);
+        }, 300);
       } catch (error) {
         const nextMessage =
           error instanceof Error
@@ -102,16 +116,26 @@ export function ExecuteActionCard({ proposal }: ExecuteActionCardProps) {
   }
 
   return (
-    <div className="action-panel action-panel--interactive">
-      <div className="action-panel__row">
+    <div className="action-panel action-panel--interactive action-panel--queue">
+      <div className="action-panel__row action-panel__row--queue">
         <span>Execution status</span>
-        <strong>{message}</strong>
+        <strong
+          className={`action-panel__status-message${
+            status === "success"
+              ? " action-panel__status-message--success"
+              : status === "error"
+              ? " action-panel__status-message--error"
+              : ""
+          }`}
+        >
+          {message}
+        </strong>
       </div>
 
-      <div className="button-row">
+      <div className="action-panel__actions">
         <button
           type="button"
-          className="button-2 button--primary"
+          className={buttonClassName}
           disabled={disabled}
           onClick={handleExecute}
         >

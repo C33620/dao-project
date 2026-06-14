@@ -8,6 +8,8 @@ import {
 import { ProposalCategory } from "@prisma/client";
 import { NextResponse } from "next/server";
 
+type ProposalKind = "standard" | "cancel";
+
 type CreateProposalMetadataBody = {
   proposalId: string;
   title: string;
@@ -20,6 +22,10 @@ type CreateProposalMetadataBody = {
   targets: string[];
   values: string[];
   calldatas: string[];
+
+  proposalKind?: ProposalKind;
+  canceledProposalId?: string | null;
+  canceledProposalTitle?: string | null;
 };
 
 function isProposalCategory(value: unknown): value is ProposalCategory {
@@ -29,6 +35,10 @@ function isProposalCategory(value: unknown): value is ProposalCategory {
     value === "WORKSHOP" ||
     value === "OTHER"
   );
+}
+
+function isProposalKind(value: unknown): value is ProposalKind {
+  return value === "standard" || value === "cancel";
 }
 
 function isHexString(value: unknown) {
@@ -62,6 +72,9 @@ export async function POST(request: Request) {
     }
 
     const body = (await request.json()) as CreateProposalMetadataBody;
+    const proposalKind: ProposalKind = isProposalKind(body.proposalKind)
+      ? body.proposalKind
+      : "standard";
 
     if (
       typeof body.proposalId !== "string" ||
@@ -81,6 +94,19 @@ export async function POST(request: Request) {
     ) {
       return NextResponse.json(
         { error: "Invalid proposal metadata." },
+        { status: 400 },
+      );
+    }
+
+    if (
+      proposalKind === "cancel" &&
+      (typeof body.canceledProposalId !== "string" ||
+        body.canceledProposalId.trim().length === 0 ||
+        typeof body.canceledProposalTitle !== "string" ||
+        body.canceledProposalTitle.trim().length === 0)
+    ) {
+      return NextResponse.json(
+        { error: "Invalid cancellation proposal metadata." },
         { status: 400 },
       );
     }
@@ -118,6 +144,18 @@ export async function POST(request: Request) {
         targets: body.targets,
         values: body.values,
         calldatas: body.calldatas,
+
+        proposalKind,
+        canceledProposalId:
+          proposalKind === "cancel"
+            ? body.canceledProposalId?.trim() ?? null
+            : null,
+        canceledProposalTitle:
+          proposalKind === "cancel"
+            ? body.canceledProposalTitle?.trim() ?? null
+            : null,
+        cancelHighlightUntil: null,
+        cancelHiddenAt: null,
       },
       create: {
         proposalId: body.proposalId.trim(),
@@ -135,6 +173,18 @@ export async function POST(request: Request) {
         targets: body.targets,
         values: body.values,
         calldatas: body.calldatas,
+
+        proposalKind,
+        canceledProposalId:
+          proposalKind === "cancel"
+            ? body.canceledProposalId?.trim() ?? null
+            : null,
+        canceledProposalTitle:
+          proposalKind === "cancel"
+            ? body.canceledProposalTitle?.trim() ?? null
+            : null,
+        cancelHighlightUntil: null,
+        cancelHiddenAt: null,
       },
     });
 
