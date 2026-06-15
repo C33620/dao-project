@@ -16,12 +16,6 @@ export async function GET(_request: Request, context: RouteContext) {
     getProposalActionState(proposalId),
   ]);
 
-  console.log("VOTE_FLOW_DEBUG", {
-    proposalId,
-    hasProposal: Boolean(proposal),
-    hasActionState: Boolean(actionState),
-  });
-
   if (!proposal || !actionState) {
     return NextResponse.json(
       {

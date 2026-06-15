@@ -98,6 +98,8 @@ function getKindLabel(kind: string) {
       return "Initial gas funding";
     case "LOW_BALANCE_GAS_REFILL":
       return "Low balance gas refill";
+    case "GOVERNANCE_REBALANCE_TOPUP":
+      return "Governance rebalance top-up";
     default:
       return kind.replaceAll("_", " ");
   }

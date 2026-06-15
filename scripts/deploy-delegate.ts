@@ -9,6 +9,7 @@ async function main() {
   const DelegateFactory = await ethers.getContractFactory(
     "CloseAccountDelegate",
   );
+
   const delegate = await DelegateFactory.deploy(governanceToken, masterWallet);
 
   await delegate.waitForDeployment();

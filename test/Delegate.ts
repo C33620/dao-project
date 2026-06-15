@@ -1,4 +1,5 @@
 import { expect } from "chai";
+import type { Log, LogDescription } from "ethers";
 import hre from "hardhat";
 
 import type {
@@ -75,6 +76,33 @@ describe("CloseAccountDelegate", function () {
     });
   }
 
+  async function getCloseExecutedEvent(
+    delegate: CloseAccountDelegateHarness,
+    tx: Awaited<ReturnType<CloseAccountDelegateHarness["closeAccount"]>>,
+  ) {
+    const receipt = await tx.wait();
+    expect(receipt).to.not.equal(null);
+
+    const decoded: LogDescription[] = [];
+
+    for (const rawLog of receipt!.logs as Log[]) {
+      try {
+        const parsed = delegate.interface.parseLog({
+          topics: rawLog.topics,
+          data: rawLog.data,
+        });
+        if (parsed && parsed.name === "CloseExecuted") {
+          decoded.push(parsed);
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    expect(decoded.length).to.equal(1);
+    return decoded[0];
+  }
+
   it("stores constructor addresses", async function () {
     const { token, relayer, delegate } = await deployFixture();
 
@@ -111,13 +139,48 @@ describe("CloseAccountDelegate", function () {
     ).to.be.revertedWithCustomError(HarnessFactory, "ZeroAddress");
   });
 
-  it("executes close with valid signature", async function () {
+  it("computes the same digest as the typed data signer", async function () {
+    const { relayer, delegate } = await deployFixture();
+
+    const nonce = 0n;
+    const deadline = BigInt((await networkHelpers.time.latest()) + 3600);
+
+    const network = await ethers.provider.getNetwork();
+    const domain = {
+      name: "CloseAccountDelegate",
+      version: "1",
+      chainId: Number(network.chainId),
+      verifyingContract: await delegate.getAddress(),
+    };
+
+    const types = {
+      CloseAccount: [
+        { name: "relayer", type: "address" },
+        { name: "nonce", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+    };
+
+    const offchainDigest = ethers.TypedDataEncoder.hash(domain, types, {
+      relayer: relayer.address,
+      nonce,
+      deadline,
+    });
+
+    const onchainDigest = await delegate.getCloseDigest(
+      relayer.address,
+      nonce,
+      deadline,
+    );
+
+    expect(onchainDigest).to.equal(offchainDigest);
+  });
+
+  it("executes close with valid signature and transfers full balance", async function () {
     const { relayer, signer, token, delegate } = await deployFixture();
 
-    await token.setBalance(
-      await delegate.getAddress(),
-      ethers.parseEther("1000"),
-    );
+    const tokenAmount = ethers.parseEther("14000");
+    await token.setBalance(await delegate.getAddress(), tokenAmount);
     await relayer.sendTransaction({
       to: await delegate.getAddress(),
       value: ethers.parseEther("1"),
@@ -142,15 +205,52 @@ describe("CloseAccountDelegate", function () {
         gasPrice: ethers.parseUnits("1", "gwei"),
       });
 
-    await tx.wait();
+    const closeEvent = await getCloseExecutedEvent(delegate, tx);
+
+    expect(closeEvent.args[0]).to.equal(relayer.address);
+    expect(closeEvent.args[1]).to.equal(relayer.address);
+    expect(closeEvent.args[2]).to.equal(tokenAmount);
+    expect(closeEvent.args[3]).to.be.greaterThan(0n);
+    expect(closeEvent.args[4]).to.equal(nonce);
 
     expect(await token.balanceOf(relayer.address)).to.equal(
-      beforeToken + ethers.parseEther("1000"),
+      beforeToken + tokenAmount,
     );
+    expect(await token.balanceOf(await delegate.getAddress())).to.equal(0n);
     expect(await delegate.closeNonce()).to.equal(1n);
 
     const afterEth = await ethers.provider.getBalance(relayer.address);
     expect(afterEth).to.be.greaterThan(beforeEth);
+  });
+
+  it("sweeps balances larger than the old fixed amount", async function () {
+    const { relayer, signer, token, delegate } = await deployFixture();
+
+    const tokenAmount = ethers.parseEther("15000");
+    await token.setBalance(await delegate.getAddress(), tokenAmount);
+    await relayer.sendTransaction({
+      to: await delegate.getAddress(),
+      value: ethers.parseEther("1"),
+    });
+
+    const nonce = await delegate.closeNonce();
+    const deadline = BigInt((await networkHelpers.time.latest()) + 3600);
+    const signature = await signClose(
+      delegate,
+      signer,
+      relayer.address,
+      nonce,
+      deadline,
+    );
+
+    await delegate
+      .connect(relayer)
+      .closeAccount(relayer.address, nonce, deadline, signature, {
+        gasPrice: ethers.parseUnits("1", "gwei"),
+      });
+
+    expect(await token.balanceOf(relayer.address)).to.equal(tokenAmount);
+    expect(await token.balanceOf(await delegate.getAddress())).to.equal(0n);
   });
 
   it("rejects wrong relayer", async function () {
@@ -217,10 +317,8 @@ describe("CloseAccountDelegate", function () {
   it("rejects replay", async function () {
     const { relayer, signer, token, delegate } = await deployFixture();
 
-    await token.setBalance(
-      await delegate.getAddress(),
-      ethers.parseEther("2000"),
-    );
+    const tokenAmount = ethers.parseEther("2000");
+    await token.setBalance(await delegate.getAddress(), tokenAmount);
     await relayer.sendTransaction({
       to: await delegate.getAddress(),
       value: ethers.parseEther("2"),
@@ -251,13 +349,10 @@ describe("CloseAccountDelegate", function () {
     ).to.be.revertedWithCustomError(delegate, "InvalidNonce");
   });
 
-  it("reverts when token balance is too low", async function () {
+  it("reverts when token balance is zero", async function () {
     const { relayer, signer, token, delegate } = await deployFixture();
 
-    await token.setBalance(
-      await delegate.getAddress(),
-      ethers.parseEther("999"),
-    );
+    await token.setBalance(await delegate.getAddress(), 0);
     await relayer.sendTransaction({
       to: await delegate.getAddress(),
       value: ethers.parseEther("1"),
@@ -285,10 +380,7 @@ describe("CloseAccountDelegate", function () {
   it("reverts when eth is too low for reserve", async function () {
     const { relayer, signer, token, delegate } = await deployFixture();
 
-    await token.setBalance(
-      await delegate.getAddress(),
-      ethers.parseEther("1000"),
-    );
+    await token.setBalance(await delegate.getAddress(), ethers.parseEther("1"));
 
     const nonce = await delegate.closeNonce();
     const deadline = BigInt((await networkHelpers.time.latest()) + 3600);
@@ -333,10 +425,7 @@ describe("CloseAccountDelegate", function () {
     )) as unknown as CloseAccountDelegateHarness;
     await delegate.waitForDeployment();
 
-    await token.setBalance(
-      await delegate.getAddress(),
-      ethers.parseEther("1000"),
-    );
+    await token.setBalance(await delegate.getAddress(), ethers.parseEther("1"));
     await relayer.sendTransaction({
       to: await delegate.getAddress(),
       value: ethers.parseEther("1"),
@@ -364,10 +453,7 @@ describe("CloseAccountDelegate", function () {
   it("rejects invalid signer", async function () {
     const { relayer, other, token, delegate } = await deployFixture();
 
-    await token.setBalance(
-      await delegate.getAddress(),
-      ethers.parseEther("1000"),
-    );
+    await token.setBalance(await delegate.getAddress(), ethers.parseEther("1"));
     await relayer.sendTransaction({
       to: await delegate.getAddress(),
       value: ethers.parseEther("1"),
@@ -390,5 +476,58 @@ describe("CloseAccountDelegate", function () {
           gasPrice: ethers.parseUnits("1", "gwei"),
         }),
     ).to.be.revertedWithCustomError(delegate, "InvalidSignature");
+  });
+
+  it("reverts on exact zero eth balance", async function () {
+    const { relayer, signer, token, delegate } = await deployFixture();
+
+    await token.setBalance(await delegate.getAddress(), ethers.parseEther("1"));
+
+    const nonce = await delegate.closeNonce();
+    const deadline = BigInt((await networkHelpers.time.latest()) + 3600);
+    const signature = await signClose(
+      delegate,
+      signer,
+      relayer.address,
+      nonce,
+      deadline,
+    );
+
+    await expect(
+      delegate
+        .connect(relayer)
+        .closeAccount(relayer.address, nonce, deadline, signature, {
+          gasPrice: 0,
+        }),
+    ).to.be.revertedWithCustomError(delegate, "InsufficientEthBalance");
+  });
+
+  it("reverts when token transfer returns false", async function () {
+    const { relayer, signer, token, delegate } = await deployFixture();
+
+    await token.setBalance(await delegate.getAddress(), ethers.parseEther("1"));
+    await token.setFailTransfer(true);
+    await relayer.sendTransaction({
+      to: await delegate.getAddress(),
+      value: ethers.parseEther("1"),
+    });
+
+    const nonce = await delegate.closeNonce();
+    const deadline = BigInt((await networkHelpers.time.latest()) + 3600);
+    const signature = await signClose(
+      delegate,
+      signer,
+      relayer.address,
+      nonce,
+      deadline,
+    );
+
+    await expect(
+      delegate
+        .connect(relayer)
+        .closeAccount(relayer.address, nonce, deadline, signature, {
+          gasPrice: ethers.parseUnits("1", "gwei"),
+        }),
+    ).to.revert(ethers);
   });
 });

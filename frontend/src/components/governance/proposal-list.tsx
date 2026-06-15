@@ -2,6 +2,7 @@
 
 import { ProposalCard } from "@/components/governance/proposal-card";
 import { VoteActionCard } from "@/components/governance/vote-action-card";
+import { getMagicWalletClient } from "@/lib/web3/magic-wallet-client";
 import type {
   ProposalActionState,
   ProposalDetail,
@@ -9,6 +10,8 @@ import type {
   VoteSupport,
 } from "@/types/governance";
 import { useEffect, useRef, useState } from "react";
+import { createPublicClient, erc20Abi, http } from "viem";
+import { sepolia } from "viem/chains";
 
 type ProposalListProps = {
   proposals: ProposalSummary[];
@@ -20,6 +23,45 @@ type VoteFlowResponse = {
   proposal: ProposalDetail;
   actionState: ProposalActionState;
 };
+
+type GovernanceFeedbackState = {
+  type: "info" | "success" | "error" | null;
+  message: string;
+};
+
+type GovernanceTargetResponse = {
+  ok: boolean;
+  snapshot?: {
+    userCount: number;
+    targetBaseUnits: string;
+    targetTokens: string;
+    thresholdTokens: string;
+    bootstrapTokens: string;
+  };
+  error?: string;
+};
+
+type GovernanceDeficitResponse = {
+  ok: boolean;
+  queued?: boolean;
+  distributionId?: string;
+  queueStatus?: string;
+  deficitBaseUnits?: string;
+  deficitTokens?: string;
+  targetBaseUnits?: string;
+  targetTokens?: string;
+  userCount?: number;
+  error?: string;
+};
+
+const GOVERNANCE_TOKEN_ADDRESS =
+  process.env.NEXT_PUBLIC_GOVERNANCE_TOKEN_ADDRESS;
+const MASTER_WALLET_ADDRESS = process.env.NEXT_PUBLIC_MASTER_WALLET_ADDRESS;
+
+const publicClient = createPublicClient({
+  chain: sepolia,
+  transport: http(),
+});
 
 export function ProposalList({
   proposals,
@@ -38,12 +80,129 @@ export function ProposalList({
     Set<string>
   >(new Set());
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [governanceFeedback, setGovernanceFeedback] =
+    useState<GovernanceFeedbackState>({
+      type: null,
+      message: "",
+    });
+
+  async function runGovernancePrecheck() {
+    if (!GOVERNANCE_TOKEN_ADDRESS || !MASTER_WALLET_ADDRESS) {
+      throw new Error("Governance token configuration is incomplete.");
+    }
+
+    const targetResponse = await fetch("/api/governance/rebalance-target", {
+      method: "GET",
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+
+    const targetData =
+      (await targetResponse.json()) as GovernanceTargetResponse;
+
+    if (!targetResponse.ok || !targetData.ok || !targetData.snapshot) {
+      throw new Error(
+        targetData.error ?? "Could not compute governance balance target.",
+      );
+    }
+
+    const walletClient = await getMagicWalletClient();
+    const [walletAddress] = await walletClient.getAddresses();
+
+    if (!walletAddress) {
+      throw new Error("No account available.");
+    }
+
+    const balance = await publicClient.readContract({
+      address: GOVERNANCE_TOKEN_ADDRESS as `0x${string}`,
+      abi: erc20Abi,
+      functionName: "balanceOf",
+      args: [walletAddress],
+    });
+
+    const target = BigInt(targetData.snapshot.targetBaseUnits);
+
+    if (balance > target) {
+      const excess = balance - target;
+
+      const hash = await walletClient.writeContract({
+        address: GOVERNANCE_TOKEN_ADDRESS as `0x${string}`,
+        abi: erc20Abi,
+        functionName: "transfer",
+        args: [MASTER_WALLET_ADDRESS as `0x${string}`, excess],
+        account: walletAddress,
+        chain: sepolia,
+      });
+
+      await publicClient.waitForTransactionReceipt({ hash });
+
+      setGovernanceFeedback({
+        type: "success",
+        message:
+          `Excess governance tokens were returned to the treasury. ` +
+          `Your account is now rebalanced, but you must wait for the next proposal snapshot before voting.`,
+      });
+
+      return { allowed: false as const };
+    }
+
+    if (balance < target) {
+      const deficitResponse = await fetch("/api/governance/rebalance-deficit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          currentBalanceBaseUnits: balance.toString(),
+        }),
+      });
+
+      const deficitData =
+        (await deficitResponse.json()) as GovernanceDeficitResponse;
+
+      if (!deficitResponse.ok || !deficitData.ok) {
+        throw new Error(
+          deficitData.error ?? "Could not queue governance deficit top-up.",
+        );
+      }
+
+      setGovernanceFeedback({
+        type: "info",
+        message: deficitData.queued
+          ? `Your account is below the governance balance target. An admin funding item has been queued. You can vote after the top-up is completed and the next snapshot is reached.`
+          : `Your account is below the governance balance target. Please wait for admin funding before voting.`,
+      });
+
+      return { allowed: false as const };
+    }
+
+    return { allowed: true as const };
+  }
 
   async function handleVoteClick(proposalId: string, support: VoteSupport) {
+    setGovernanceFeedback({ type: null, message: "" });
+
+    try {
+      const precheck = await runGovernancePrecheck();
+
+      if (!precheck.allowed) {
+        return;
+      }
+    } catch (error) {
+      setGovernanceFeedback({
+        type: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "We could not verify your governance balance.",
+      });
+      return;
+    }
+
     setIsModalOpen(true);
     setIsLoadingVoteFlow(true);
     setLoadError(null);
-
     setSelectedProposal(null);
     setSelectedActionState(null);
 
@@ -139,6 +298,25 @@ export function ProposalList({
             Proposals to vote for
           </h2>
         </div>
+
+        {governanceFeedback.type ? (
+          <div
+            className={
+              governanceFeedback.type === "success"
+                ? "status-badge status-badge--success treasury-page-feedback"
+                : governanceFeedback.type === "info"
+                ? "status-badge status-badge--info treasury-page-feedback"
+                : "status-badge status-badge--danger treasury-page-feedback"
+            }
+            role="status"
+            aria-live="polite"
+          >
+            <span className="status-badge__dot" />
+            <span className="status-badge__label">
+              {governanceFeedback.message}
+            </span>
+          </div>
+        ) : null}
 
         <div className="proposal-list">
           {proposals.map((proposal) => (

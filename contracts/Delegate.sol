@@ -12,7 +12,6 @@ contract CloseAccountDelegate {
     address public immutable GOVERNANCE_TOKEN;
     address public immutable MASTER_WALLET;
 
-    uint256 public constant TOKEN_AMOUNT = 1000 ether;
     uint256 public constant GAS_BUFFER = 50_000;
 
     bytes32 public immutable DOMAIN_SEPARATOR;
@@ -87,7 +86,7 @@ contract CloseAccountDelegate {
 
         closeNonce = nonce + 1;
 
-        _transferGovernanceTokens();
+        uint256 tokenAmountSent = _transferGovernanceTokens();
 
         uint256 amountToSend = _computeEthToSend();
         _sendEth(amountToSend);
@@ -95,7 +94,7 @@ contract CloseAccountDelegate {
         emit CloseExecuted(
             msg.sender,
             MASTER_WALLET,
-            TOKEN_AMOUNT,
+            tokenAmountSent,
             amountToSend,
             nonce
         );
@@ -126,11 +125,12 @@ contract CloseAccountDelegate {
         return ECDSA.recover(digest, signature);
     }
 
-    function _transferGovernanceTokens() internal {
+    function _transferGovernanceTokens() internal returns (uint256 amountSent) {
         uint256 tokenBal = IERC20(GOVERNANCE_TOKEN).balanceOf(address(this));
-        if (tokenBal < TOKEN_AMOUNT) revert InsufficientTokenBalance();
+        if (tokenBal == 0) revert InsufficientTokenBalance();
 
-        IERC20(GOVERNANCE_TOKEN).safeTransfer(MASTER_WALLET, TOKEN_AMOUNT);
+        IERC20(GOVERNANCE_TOKEN).safeTransfer(MASTER_WALLET, tokenBal);
+        return tokenBal;
     }
 
     function _computeEthToSend() internal view returns (uint256 amountToSend) {

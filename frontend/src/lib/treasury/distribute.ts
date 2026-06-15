@@ -13,6 +13,8 @@ import type { Address } from "viem";
 
 const INITIAL_ALLOCATION_KIND = TreasuryDistributionKind.INITIAL_ALLOCATION;
 const INITIAL_GAS_FUNDING_KIND = TreasuryDistributionKind.INITIAL_GAS_FUNDING;
+const GOVERNANCE_REBALANCE_TOPUP_KIND =
+  TreasuryDistributionKind.GOVERNANCE_REBALANCE_TOPUP;
 const LOW_BALANCE_GAS_REFILL_KIND =
   TreasuryDistributionKind.LOW_BALANCE_GAS_REFILL;
 
@@ -91,6 +93,32 @@ function getRequiredDistributionConfigs(userId: string): DistributionConfig[] {
       idempotencyKey: `initial-gas-funding:${userId}`,
     },
   ];
+}
+
+function getGovernanceRebalanceTopUpConfig(
+  userId: string,
+  amountBaseUnits: string,
+): DistributionConfig {
+  const tokenAddress = process.env.GOVERNANCE_TOKEN_ADDRESS;
+
+  if (!tokenAddress) {
+    throw new Error("GOVERNANCE_TOKEN_ADDRESS is not configured.");
+  }
+
+  return {
+    kind: GOVERNANCE_REBALANCE_TOPUP_KIND,
+    amountBaseUnits,
+    tokenAddress,
+    queuedEvent: TreasuryAuditEventType.GOVERNANCE_REBALANCE_TOPUP_QUEUED,
+    blockedPausedEvent:
+      TreasuryAuditEventType.GOVERNANCE_REBALANCE_TOPUP_BLOCKED_PAUSED,
+    blockedAlreadyFundedEvent:
+      TreasuryAuditEventType.GOVERNANCE_REBALANCE_TOPUP_BLOCKED_ALREADY_FUNDED,
+    submittedEvent: TreasuryAuditEventType.GOVERNANCE_REBALANCE_TOPUP_SUBMITTED,
+    confirmedEvent: TreasuryAuditEventType.GOVERNANCE_REBALANCE_TOPUP_CONFIRMED,
+    failedEvent: TreasuryAuditEventType.GOVERNANCE_REBALANCE_TOPUP_FAILED,
+    idempotencyKey: `governance-rebalance-topup:${userId}`,
+  };
 }
 
 function getLowBalanceGasRefillConfig(userId: string): DistributionConfig {
@@ -371,6 +399,50 @@ export async function queueInitialAllocationForUser(
   return queueInitialFundingForUser(input);
 }
 
+export async function queueGovernanceRebalanceTopUpForUser(input: {
+  userId: string;
+  normalizedEmail: string;
+  issuer: string;
+  walletAddress: string;
+  amountBaseUnits: string;
+}) {
+  const config = getGovernanceRebalanceTopUpConfig(
+    input.userId,
+    input.amountBaseUnits,
+  );
+
+  await writeTreasuryAuditEvent({
+    userId: input.userId,
+    type: TreasuryAuditEventType.GOVERNANCE_REBALANCE_TOPUP_REQUESTED,
+    normalizedEmail: input.normalizedEmail,
+    issuer: input.issuer,
+    walletAddress: input.walletAddress,
+    kind: config.kind,
+    amountBaseUnits: input.amountBaseUnits,
+    tokenAddress: config.tokenAddress ?? undefined,
+    chainId: getTreasuryChainId(),
+    idempotencyKey: config.idempotencyKey,
+    metadata: {
+      trigger: "governance-vote-precheck",
+    },
+  });
+
+  const result = await queueSingleDistributionForUser(
+    {
+      userId: input.userId,
+      normalizedEmail: input.normalizedEmail,
+      issuer: input.issuer,
+      walletAddress: input.walletAddress,
+    },
+    config,
+  );
+
+  return {
+    status: result.status,
+    distributionId: result.distribution.id,
+  };
+}
+
 export async function ensureLowBalanceGasRefillForUser(userId: string) {
   console.log("[refill-check] called for userId", userId);
 
@@ -392,9 +464,9 @@ export async function ensureLowBalanceGasRefillForUser(userId: string) {
     return { status: "skipped" as const, reason: "missing-user-data" as const };
   }
 
-   if (user.role === "VIEWER") {
-     return { status: "skipped" as const, reason: "non-member-role" as const };
-   }
+  if (user.role === "VIEWER") {
+    return { status: "skipped" as const, reason: "non-member-role" as const };
+  }
 
   const thresholdWei = getLowBalanceThresholdWei();
   console.log("[refill-check] threshold", thresholdWei.toString());
@@ -412,8 +484,6 @@ export async function ensureLowBalanceGasRefillForUser(userId: string) {
     "needs refill",
     balanceWei < thresholdWei,
   );
-
-  // ... rest of the function unchanged
 
   if (balanceWei >= thresholdWei) {
     return {
@@ -474,6 +544,16 @@ function getAuditEventConfig(kind: TreasuryDistributionKind) {
       submittedEvent: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_SUBMITTED,
       confirmedEvent: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_CONFIRMED,
       failedEvent: TreasuryAuditEventType.LOW_BALANCE_GAS_REFILL_FAILED,
+    };
+  }
+
+  if (kind === GOVERNANCE_REBALANCE_TOPUP_KIND) {
+    return {
+      submittedEvent:
+        TreasuryAuditEventType.GOVERNANCE_REBALANCE_TOPUP_SUBMITTED,
+      confirmedEvent:
+        TreasuryAuditEventType.GOVERNANCE_REBALANCE_TOPUP_CONFIRMED,
+      failedEvent: TreasuryAuditEventType.GOVERNANCE_REBALANCE_TOPUP_FAILED,
     };
   }
 

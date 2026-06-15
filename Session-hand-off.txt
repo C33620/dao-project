@@ -1,0 +1,175 @@
+
+
+contracts address
+
+GovernanceToken: 0x5d9A21fE5f8314D8980e6aC1D1AEBFa8185ECFC8
+Timelock: 0x856D887dd70EA2bFc66497B803B7f70fe20fF31b
+Governor: 0x5e550C752F8d3Ea16B327877538C62a8A3E9AC6c
+Box: 0x25f466ee1054787A328AFF77758d3C8011d3a19F
+ProposalRegistry: 0x139DeCfEB250437028D233Ac7c8FC354771f1f22
+
+
+
+Token distribution
+
+“KTM is manually transferred from deployer to test wallets after deployment.”
+
+Voting power
+
+“Upon wallet connection, the UI ensures the wallet’s voting power is activated via self‑delegation (or delegation to the user’s own wallet) by calling token.delegate(walletAddress).”
+
+“No governance action is possible until the wallet has delegated. The UI guards against this by checking balances and voting‑power status.”
+
+
+### Token distribution on Sepolia
+
+- KTM are minted to the deployer wallet at deployment.
+- That deployer private key is imported into MetaMask as the "master wallet" on the Sepolia network.
+- KTM are then manually sent from the master wallet to 3–5 test wallets via MetaMask's "Send" UI.
+- Each test wallet self‑delegates via the UI upon connection.
+
+
+
+
+Handoff
+Project
+DAO governance frontend using Magic embedded wallets, OpenZeppelin Governor, and a proposal metadata API.
+
+Current status
+The proposal creation flow is working end to end.
+
+What is already done
+Self-delegation is working.
+
+Proposal eligibility gating is working.
+
+Proposal creation via governor is working.
+
+The frontend submits governor.propose(...).
+
+The receipt is processed and the real proposalId is extracted or derived.
+
+Proposal metadata is saved through /api/proposals.
+
+Direct frontend writes to ProposalRegistry were removed.
+
+The proposal success path no longer depends on the registry contract.
+
+The user-facing success state confirms proposal creation plus metadata persistence.
+
+The app uses app/session state only as supporting context.
+
+Onchain state remains the source of truth for token balance, delegation, voting power, and proposal eligibility.
+
+Current architecture
+Governor contract = source of truth for proposal creation and lifecycle.
+
+API metadata (/api/proposals) = source of truth for app-side proposal details like category and display metadata.
+
+proposalId = canonical join key between onchain proposal state and app metadata.
+
+Magic embedded wallets = used for signing, no wallet-connect flow.
+
+Important implemented behavior
+If the account is still being prepared by the app/session layer, the UI shows setup messaging.
+
+If tokens are present but self-delegation is missing, the UI shows Enable proposal.
+
+Clicking Enable proposal triggers self-delegation through Magic signing.
+
+After delegation, the UI refetches reads and unlocks Review proposal when the chain confirms eligibility.
+
+Delegation failures show Something went wrong.
+
+Full underlying errors are logged to the console.
+
+Proposal flow now
+User enters proposal text and category.
+
+Frontend checks delegation and voting readiness.
+
+User reviews the proposal in the modal.
+
+Frontend submits governor.propose(...).
+
+Frontend waits for the receipt.
+
+Proposal ID is extracted from ProposalCreated, or derived as fallback.
+
+Metadata is posted to /api/proposals.
+
+Success state is shown.
+
+Categories already introduced
+Proposal creation now includes categories:
+
+Coffee Meetup
+
+Hack Day
+
+Workshop
+
+Other
+
+These are intended to classify proposals in the Proposal, Verify, and History tabs.
+
+Known remaining caveat
+The proposal submission flow still needs the final cleanup around reliable proposal lifecycle views and voting.
+
+The registry contract is no longer part of the frontend flow.
+
+If ProposalRegistry is still needed later, it will need a separate admin or execution-time workflow.
+
+Next recommended step
+The next best development milestone is:
+
+Render created proposals in the Proposal tab and allow eligible users to vote on active proposals.
+
+That means:
+
+fetch proposal metadata from the API,
+
+join it with onchain lifecycle state using proposalId,
+
+show proposals in the Proposal tab,
+
+show current state from the governor,
+
+enable voting only when a proposal is active,
+
+wire vote submission through the governor contract.
+
+What should be verified next time
+Newly created proposals appear in the Proposal tab.
+
+Proposal state is read from chain using proposalId.
+
+Category labels display correctly.
+
+Voting is possible only for eligible users on active proposals.
+
+History shows ended proposals.
+
+Failed reads and partial metadata issues are handled gracefully.
+
+Good next session prompt
+“Continue from the current governance flow. Proposal creation, self-delegation, and metadata persistence already work. Next, render created proposals in the Proposal tab, join API metadata with onchain governor state by proposalId, and enable voting on active proposals.”
+
+Before shipping
+The remaining work before a first ship is:
+
+Proposal tab rendering
+
+Voting flow
+
+History / lifecycle views
+
+Category display consistency
+
+Error-state hardening
+
+Duplicate-save protection
+
+Final UX polish
+
+

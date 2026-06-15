@@ -129,6 +129,30 @@ function buildVoteActionState(proposal: ProposalDetail): VoteActionState {
     };
   }
 
+  if (proposal.status === "active" && governance?.needsDelegation) {
+    return {
+      status: "review",
+      submitLabel: "Enable vote",
+      feedbackTitle: "Delegation required",
+      feedbackMessage:
+        "Delegate voting power to yourself before voting on this proposal.",
+    };
+  }
+
+  if (
+    proposal.status === "active" &&
+    governance &&
+    BigInt(governance.userVotingPower) <= BigInt(0)
+  ) {
+    return {
+      status: "idle",
+      submitLabel: "Not eligible for this snapshot",
+      feedbackTitle: "Snapshot already passed",
+      feedbackMessage:
+        "Your wallet balance may be updated now, but you did not have voting power at this proposal's snapshot. You can vote on future proposals after the rebalance is reflected in a new snapshot.",
+    };
+  }
+
   if (proposal.status === "active") {
     return {
       status: "review",
@@ -219,6 +243,14 @@ function buildActionSummary(proposal: ProposalDetail): string {
 
   if (proposal.status === "active" && governance?.needsDelegation) {
     return "Voting is open, but you need to self-delegate before voting.";
+  }
+
+  if (
+    proposal.status === "active" &&
+    governance &&
+    BigInt(governance.userVotingPower) <= BigInt(0)
+  ) {
+    return "Voting is open, but you did not have voting power at this proposal's snapshot.";
   }
 
   if (proposal.status === "active") {
