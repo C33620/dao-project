@@ -22,6 +22,7 @@ import {
   BrowserProvider,
   Contract,
   Interface,
+  JsonRpcProvider,
   type TransactionReceipt,
 } from "ethers";
 import Link from "next/link";
@@ -131,6 +132,44 @@ function extractProposalIdFromReceipt(receipt: unknown): bigint | null {
   }
 
   return null;
+}
+
+function getReceiptProvider() {
+  const rpcUrl = process.env.NEXT_PUBLIC_SEPOLIA_RPC_URL;
+
+  if (!rpcUrl) {
+    throw new Error("Sepolia RPC URL is not configured on the frontend.");
+  }
+
+  return new JsonRpcProvider(rpcUrl);
+}
+
+async function waitForReceiptWithFallback(
+  txHash: string,
+  provider: JsonRpcProvider,
+  timeoutMs = 90_000,
+  attempts = 6,
+  delayMs = 5_000,
+): Promise<TransactionReceipt> {
+  const receipt = await provider.waitForTransaction(txHash, 1, timeoutMs);
+
+  if (receipt) {
+    return receipt;
+  }
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const fallbackReceipt = await provider.getTransactionReceipt(txHash);
+
+    if (fallbackReceipt) {
+      return fallbackReceipt as TransactionReceipt;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+
+  throw new Error(
+    `Transaction was submitted but no receipt was found yet. Hash: ${txHash}`,
+  );
 }
 
 async function deriveProposalId({
@@ -294,8 +333,12 @@ export default function CreateProposalClient({
   });
 
   const action = useMemo(
-    () => buildPersistedProposalAction(proposalDescription),
-    [proposalDescription],
+    () =>
+      buildPersistedProposalAction({
+        mode,
+        description: proposalDescription,
+      }),
+    [mode, proposalDescription],
   );
 
   const isSubmittingProposal =
@@ -469,7 +512,6 @@ export default function CreateProposalClient({
     setIsReviewOpen(false);
     setSubmissionStage("idle");
   }
-
   async function handleEnableProposal() {
     if (!accountAddress || isDelegationBusy) {
       return;
@@ -482,6 +524,7 @@ export default function CreateProposalClient({
       const magic = getMagicClient();
       const provider = new BrowserProvider(magic.rpcProvider);
       const signer = await provider.getSigner();
+      const receiptProvider = getReceiptProvider();
 
       const governanceTokenContract = new Contract(
         GOVERNANCE_TOKEN_ADDRESS,
@@ -492,7 +535,8 @@ export default function CreateProposalClient({
       setDelegationStage("pending");
 
       const tx = await governanceTokenContract.delegate(accountAddress);
-      await tx.wait();
+
+      await waitForReceiptWithFallback(tx.hash, receiptProvider, 90_000);
 
       await Promise.all([refetchBalance(), refetchDelegates(), refetchVotes()]);
 
@@ -500,7 +544,9 @@ export default function CreateProposalClient({
     } catch (error) {
       console.error("SELF_DELEGATION_WRITE_ERROR", error);
       setDelegationStage("error");
-      setDelegationError("Something went wrong.");
+      setDelegationError(
+        error instanceof Error ? error.message : "Something went wrong.",
+      );
     }
   }
 
@@ -521,6 +567,7 @@ export default function CreateProposalClient({
       const magic = getMagicClient();
       const provider = new BrowserProvider(magic.rpcProvider);
       const signer = await provider.getSigner();
+      const receiptProvider = getReceiptProvider();
 
       const governorContract = new Contract(
         MY_GOVERNOR_ADDRESS,
@@ -542,22 +589,49 @@ export default function CreateProposalClient({
         canceledProposalId: selectedCanceledProposal?.proposalId ?? null,
       });
 
-      const governorTx = await governorContract.propose(
+      const latestNonce = await receiptProvider.getTransactionCount(
+        accountAddress,
+        "latest",
+      );
+
+      const pendingNonce = await receiptProvider.getTransactionCount(
+        accountAddress,
+        "pending",
+      );
+
+      if (pendingNonce > latestNonce) {
+        throw new Error(
+          "This wallet already has a pending transaction. Please wait for it to confirm before submitting another proposal.",
+        );
+      }
+
+      const feeData = await receiptProvider.getFeeData();
+
+      const txData = governorContract.interface.encodeFunctionData("propose", [
         action.targets,
         action.values,
         action.calldatas,
         proposalDescription,
-      );
+      ]);
+
+      const governorTx = await signer.sendTransaction({
+        to: MY_GOVERNOR_ADDRESS,
+        data: txData,
+        value: BigInt(0),
+        maxFeePerGas: feeData.maxFeePerGas ?? undefined,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?? undefined,
+      });
+
+      console.log("GOVERNOR_TX_SUBMITTED", { hash: governorTx.hash });
 
       setGovernorTxHash(governorTx.hash ?? null);
       setSubmissionStage("creating-proposal");
 
-      const governorReceipt =
-        (await governorTx.wait()) as TransactionReceipt | null;
-
-      if (!governorReceipt) {
-        throw new Error("Governor transaction receipt not found.");
-      }
+      const governorReceipt = await waitForReceiptWithFallback(
+        governorTx.hash,
+        receiptProvider,
+        90_000,
+      );
 
       let proposalId = extractProposalIdFromReceipt(governorReceipt);
 
@@ -624,6 +698,82 @@ export default function CreateProposalClient({
       router.refresh();
     } catch (error) {
       console.error("GOVERNOR_PROPOSAL_SUBMISSION_ERROR", error);
+
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        error.code === "REPLACEMENT_UNDERPRICED"
+      ) {
+        setSubmissionStage("error");
+        setSubmissionError(
+          "A previous wallet transaction appears to still be active in the provider. Please wait a moment and try again.",
+        );
+        return;
+      }
+
+      if (
+        error instanceof Error &&
+        error.message.toLowerCase().includes("replacement fee too low")
+      ) {
+        setSubmissionStage("error");
+        setSubmissionError(
+          "The wallet provider rejected this transaction as a nonce replacement. Please wait a moment and try again.",
+        );
+        return;
+      }
+
+      if (error && typeof error === "object") {
+        const maybeData =
+          "data" in error && typeof error.data === "string"
+            ? error.data
+            : "info" in error &&
+              error.info &&
+              typeof error.info === "object" &&
+              "error" in error.info &&
+              error.info.error &&
+              typeof error.info.error === "object" &&
+              "data" in error.info.error &&
+              typeof error.info.error.data === "string"
+            ? error.info.error.data
+            : null;
+
+        if (maybeData) {
+          try {
+            const decodedGovernorError = new Interface(
+              myGovernorAbi,
+            ).parseError(maybeData);
+
+            console.error(
+              "DECODED_GOVERNOR_ERROR_NAME",
+              decodedGovernorError?.name,
+            );
+            console.error(
+              "DECODED_GOVERNOR_ERROR_ARGS",
+              decodedGovernorError?.args,
+            );
+            console.error(
+              "DECODED_GOVERNOR_ERROR_SIGNATURE",
+              decodedGovernorError?.signature,
+            );
+          } catch (decodeGovernorError) {
+            console.error(
+              "FAILED_TO_DECODE_GOVERNOR_ERROR",
+              decodeGovernorError,
+            );
+          }
+
+          try {
+            const decodedTokenError = new Interface(
+              governanceTokenAbi,
+            ).parseError(maybeData);
+            console.error("DECODED_TOKEN_ERROR", decodedTokenError);
+          } catch (decodeTokenError) {
+            console.error("FAILED_TO_DECODE_TOKEN_ERROR", decodeTokenError);
+          }
+        }
+      }
+
       setSubmissionStage("error");
       setSubmissionError(
         error instanceof Error

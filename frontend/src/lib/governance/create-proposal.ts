@@ -10,6 +10,7 @@ import {
 } from "viem";
 
 export type ProposalOrigin = "dashboard" | "proposals";
+export type ProposalMode = "standard" | "cancel";
 
 export type PersistedProposalAction = {
   targets: Address[];
@@ -59,7 +60,21 @@ export function buildProposalDescription(input: {
   return sections.join("\n");
 }
 
-export function buildProposalAction() {
+function buildStandardProposalAction() {
+  const calldata = encodeFunctionData({
+    abi: myGovernorAbi,
+    functionName: "setVotingPeriod",
+    args: [2900],
+  });
+
+  return {
+    targets: [MY_GOVERNOR_ADDRESS as Address],
+    values: [BigInt(0)],
+    calldatas: [calldata as Hex],
+  };
+}
+
+function buildCancelProposalAction() {
   const calldata = encodeFunctionData({
     abi: myGovernorAbi,
     functionName: "setVotingPeriod",
@@ -77,14 +92,18 @@ export function buildDescriptionHash(description: string) {
   return keccak256(stringToHex(description));
 }
 
-export function buildPersistedProposalAction(
-  description: string,
-): PersistedProposalAction {
-  const action = buildProposalAction();
+export function buildPersistedProposalAction(input: {
+  mode: ProposalMode;
+  description: string;
+}): PersistedProposalAction {
+  const action =
+    input.mode === "cancel"
+      ? buildCancelProposalAction()
+      : buildStandardProposalAction();
 
   return {
     ...action,
-    descriptionHash: buildDescriptionHash(description),
+    descriptionHash: buildDescriptionHash(input.description),
   };
 }
 

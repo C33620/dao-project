@@ -54,14 +54,84 @@ type GovernanceDeficitResponse = {
   error?: string;
 };
 
+type RebalanceGuard = {
+  active: true;
+  snapshotBlock: string;
+};
+
 const GOVERNANCE_TOKEN_ADDRESS =
   process.env.NEXT_PUBLIC_GOVERNANCE_TOKEN_ADDRESS;
 const MASTER_WALLET_ADDRESS = process.env.NEXT_PUBLIC_MASTER_WALLET_ADDRESS;
+const REBALANCE_GUARD_KEY = "governance-rebalance-guard";
+const REBALANCE_PENDING_KEY = "governance-rebalance-pending";
 
 const publicClient = createPublicClient({
   chain: sepolia,
   transport: http(),
 });
+
+function readRebalanceGuard(): RebalanceGuard | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const raw = window.sessionStorage.getItem(REBALANCE_GUARD_KEY);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as RebalanceGuard;
+  } catch {
+    window.sessionStorage.removeItem(REBALANCE_GUARD_KEY);
+    return null;
+  }
+}
+
+function writeRebalanceGuard(snapshotBlock: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const value: RebalanceGuard = {
+    active: true,
+    snapshotBlock,
+  };
+
+  window.sessionStorage.setItem(REBALANCE_GUARD_KEY, JSON.stringify(value));
+}
+
+function clearRebalanceGuard() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.sessionStorage.removeItem(REBALANCE_GUARD_KEY);
+}
+
+function markRebalancePending() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.sessionStorage.setItem(REBALANCE_PENDING_KEY, "true");
+}
+
+function hasPendingRebalance() {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.sessionStorage.getItem(REBALANCE_PENDING_KEY) === "true";
+}
+
+function clearPendingRebalance() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.sessionStorage.removeItem(REBALANCE_PENDING_KEY);
+}
 
 export function ProposalList({
   proposals,
@@ -135,6 +205,7 @@ export function ProposalList({
       });
 
       await publicClient.waitForTransactionReceipt({ hash });
+      markRebalancePending();
 
       setGovernanceFeedback({
         type: "success",
@@ -218,6 +289,35 @@ export function ProposalList({
 
       const data = (await response.json()) as VoteFlowResponse;
 
+      console.log("vote-flow proposal", data.proposal);
+      console.log("snapshotBlock", data.proposal.governance?.snapshotBlock);
+
+      const snapshotBlock = data.proposal.governance?.snapshotBlock;
+
+      if (hasPendingRebalance() && snapshotBlock) {
+        writeRebalanceGuard(snapshotBlock);
+        clearPendingRebalance();
+      }
+
+      const guard = readRebalanceGuard();
+
+      if (guard && snapshotBlock) {
+        const currentSnapshot = BigInt(snapshotBlock);
+        const blockedUntilAfter = BigInt(guard.snapshotBlock);
+
+        if (currentSnapshot <= blockedUntilAfter) {
+          closeModal();
+          setGovernanceFeedback({
+            type: "info",
+            message:
+              "Your wallet was rebalanced. You must wait for a proposal with a newer snapshot before voting.",
+          });
+          return;
+        }
+
+        clearRebalanceGuard();
+      }
+
       setSelectedProposal(data.proposal);
       setSelectedActionState({
         ...data.actionState,
@@ -241,7 +341,6 @@ export function ProposalList({
     setIsModalOpen(false);
     setSelectedProposal(null);
     setSelectedActionState(null);
-
     setLoadError(null);
   }
 
