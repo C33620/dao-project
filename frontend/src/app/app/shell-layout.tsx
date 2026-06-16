@@ -24,12 +24,14 @@ export function AppShellLayout({
 }: AppShellLayoutProps) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [liveAdminPendingCount, setLiveAdminPendingCount] =
-    useState(adminPendingCount);
+  const [liveAdminPendingCount, setLiveAdminPendingCount] = useState<
+    number | null
+  >(null);
 
   const isAdminTreasuryPage = pathname === "/app/admin/treasury";
+  const effectiveAdminPendingCount = liveAdminPendingCount ?? adminPendingCount;
   const displayedAdminPendingCount =
-    role === "admin" && isAdminTreasuryPage ? 0 : liveAdminPendingCount;
+    role === "admin" && isAdminTreasuryPage ? 0 : effectiveAdminPendingCount;
 
   useEffect(() => {
     if (role !== "admin") {
@@ -55,9 +57,7 @@ export function AppShellLayout({
         if (!cancelled && data.ok && typeof data.count === "number") {
           setLiveAdminPendingCount(data.count);
         }
-      } catch {
-        // Keep the last known count.
-      }
+      } catch {}
     }
 
     void refreshPendingCount();

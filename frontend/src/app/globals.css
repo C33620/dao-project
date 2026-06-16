@@ -2849,3 +2849,29 @@ main {
 .action-panel__row--queue-label-right .action-panel__status-message {
   order: 1;
 }
+
+.proposal-skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(15, 23, 42, 0.06) 25%,
+    rgba(15, 23, 42, 0.12) 50%,
+    rgba(15, 23, 42, 0.06) 75%
+  );
+  background-size: 200% 100%;
+  animation: proposal-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes proposal-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .proposal-skeleton {
+    animation: none;
+  }
+}

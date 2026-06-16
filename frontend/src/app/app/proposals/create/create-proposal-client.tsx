@@ -25,9 +25,8 @@ import {
   JsonRpcProvider,
   type TransactionReceipt,
 } from "ethers";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useReadContract } from "wagmi";
 
 type CreateProposalMode = "standard" | "cancel";
@@ -66,6 +65,58 @@ type StoredProposalLifecycle = {
   snapshot?: bigint;
   deadline?: bigint;
 };
+
+type ProposalStatus =
+  | "pending"
+  | "active"
+  | "succeeded"
+  | "defeated"
+  | "queued"
+  | "executed"
+  | "canceled"
+  | "expired";
+
+type ProposalListItem = {
+  id: string;
+  title: string;
+  category: ProposalCategory;
+  status: ProposalStatus;
+  executedAt?: string | null;
+};
+
+function isProposalCategory(value: unknown): value is ProposalCategory {
+  return (
+    value === "COFFEE_MEETUP" ||
+    value === "HACK_DAY" ||
+    value === "WORKSHOP" ||
+    value === "OTHER"
+  );
+}
+
+function isProposalListItem(value: unknown): value is ProposalListItem {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const proposal = value as Record<string, unknown>;
+
+  return (
+    typeof proposal.id === "string" &&
+    typeof proposal.title === "string" &&
+    isProposalCategory(proposal.category) &&
+    typeof proposal.status === "string" &&
+    [
+      "pending",
+      "active",
+      "succeeded",
+      "defeated",
+      "queued",
+      "executed",
+      "canceled",
+      "expired",
+    ].includes(proposal.status)
+  );
+}
 
 function isBigIntOrNumber(value: unknown): value is bigint | number {
   return typeof value === "bigint" || typeof value === "number";
@@ -224,6 +275,155 @@ async function deriveProposalId({
   return null;
 }
 
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+
+  return "Something went wrong.";
+}
+
+function getNestedRpcMessage(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  if ("message" in error && typeof error.message === "string") {
+    return error.message;
+  }
+
+  if (
+    "error" in error &&
+    error.error &&
+    typeof error.error === "object" &&
+    "message" in error.error &&
+    typeof error.error.message === "string"
+  ) {
+    return error.error.message;
+  }
+
+  if (
+    "info" in error &&
+    error.info &&
+    typeof error.info === "object" &&
+    "error" in error.info &&
+    error.info.error &&
+    typeof error.info.error === "object" &&
+    "message" in error.info.error &&
+    typeof error.info.error.message === "string"
+  ) {
+    return error.info.error.message;
+  }
+
+  return null;
+}
+
+function normalizeSubmissionError(error: unknown): string {
+  const directMessage = getErrorMessage(error).toLowerCase();
+  const nestedMessage = getNestedRpcMessage(error)?.toLowerCase() ?? "";
+  const combined = `${directMessage} ${nestedMessage}`;
+
+  if (
+    combined.includes("replacement fee too low") ||
+    combined.includes("replacement transaction underpriced") ||
+    (typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "REPLACEMENT_UNDERPRICED")
+  ) {
+    return "A previous wallet transaction appears to still be active in the provider. Please wait a moment and try again.";
+  }
+
+  if (combined.includes("gapped-nonce tx from delegated accounts")) {
+    return "This wallet still has unresolved delegated-account transaction state. Please wait for the previous transaction to settle before trying again.";
+  }
+
+  if (
+    combined.includes(
+      "in-flight transaction limit reached for delegated accounts",
+    )
+  ) {
+    return "This wallet already has an in-flight delegated transaction. Please wait for it to confirm before submitting another proposal.";
+  }
+
+  if (combined.includes("already has a pending transaction")) {
+    return "This wallet already has a pending transaction. Please wait for it to confirm before submitting another proposal.";
+  }
+
+  if (combined.includes("user rejected") || combined.includes("user denied")) {
+    return "The wallet confirmation was cancelled.";
+  }
+
+  if (combined.includes("insufficient funds")) {
+    return getErrorMessage(error);
+  }
+
+  return getErrorMessage(error);
+}
+
+function getRpcErrorData(error: unknown): string | null {
+  if (!error || typeof error !== "object") {
+    return null;
+  }
+
+  if ("data" in error && typeof error.data === "string") {
+    return error.data;
+  }
+
+  if (
+    "info" in error &&
+    error.info &&
+    typeof error.info === "object" &&
+    "error" in error.info &&
+    error.info.error &&
+    typeof error.info.error === "object" &&
+    "data" in error.info.error &&
+    typeof error.info.error.data === "string"
+  ) {
+    return error.info.error.data;
+  }
+
+  return null;
+}
+
+function InlineMessage({
+  message,
+  tone = "error",
+  margin = 0,
+}: {
+  message: string;
+  tone?: "error" | "info";
+  margin?: number;
+}) {
+  const isError = tone === "error";
+
+  return (
+    <div
+      role={isError ? "alert" : "status"}
+      aria-live={isError ? "assertive" : "polite"}
+      style={{
+        margin,
+        padding: "12px 14px",
+        borderRadius: 12,
+        border: isError
+          ? "1px solid rgba(185, 28, 28, 0.18)"
+          : "1px solid rgba(15, 23, 42, 0.10)",
+        background: isError
+          ? "rgba(254, 242, 242, 0.92)"
+          : "rgba(15, 23, 42, 0.04)",
+        color: isError ? "rgb(153, 27, 27)" : "rgba(15, 23, 42, 0.78)",
+        lineHeight: 1.5,
+      }}
+    >
+      {message}
+    </div>
+  );
+}
+
 export default function CreateProposalClient({
   origin,
   walletAddress,
@@ -231,7 +431,6 @@ export default function CreateProposalClient({
   mode = "standard",
   cancelTargetOptions = [],
 }: CreateProposalClientProps) {
-  const router = useRouter();
   const accountAddress = walletAddress;
 
   const [proposalText, setProposalText] = useState("");
@@ -250,11 +449,124 @@ export default function CreateProposalClient({
 
   const [storedProposalLifecycle, setStoredProposalLifecycle] =
     useState<StoredProposalLifecycle | null>(null);
-  const [hasMetadataWriteStarted, setHasMetadataWriteStarted] = useState(false);
-  const [hasCreatedProposalId, setHasCreatedProposalId] = useState(false);
   const [governorTxHash, setGovernorTxHash] = useState<string | null>(null);
 
   const createdProposalIdRef = useRef<bigint | null>(null);
+  const submitLockRef = useRef(false);
+  const delegationLockRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const router = useRouter();
+
+  const [resolvedCancelTargetOptions, setResolvedCancelTargetOptions] =
+    useState<CancelTargetOption[]>(cancelTargetOptions);
+  const [isLoadingCancelTargetOptions, setIsLoadingCancelTargetOptions] =
+    useState(mode === "cancel" && cancelTargetOptions.length === 0);
+
+  useEffect(() => {
+    if (mode !== "cancel" || cancelTargetOptions.length > 0) {
+      return;
+    }
+
+    let isActive = true;
+
+    async function loadCancelTargetOptions() {
+      try {
+        setIsLoadingCancelTargetOptions(true);
+
+        const response = await fetch("/api/proposals", {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          throw new Error("Failed to load executed proposals.");
+        }
+
+        const result: unknown = await response.json();
+
+        const proposals: ProposalListItem[] =
+          result &&
+          typeof result === "object" &&
+          "data" in result &&
+          Array.isArray(result.data)
+            ? result.data.filter(isProposalListItem)
+            : [];
+
+        const executedOptions: CancelTargetOption[] = proposals
+          .filter((proposal) => proposal.status === "executed")
+          .map((proposal) => ({
+            proposalId: proposal.id,
+            title: proposal.title,
+            category: proposal.category,
+            executedAt: proposal.executedAt ?? undefined,
+          }));
+
+        if (isActive) {
+          setResolvedCancelTargetOptions(executedOptions);
+        }
+      } catch (error) {
+        console.error("LOAD_CANCEL_TARGET_OPTIONS_ERROR", error);
+
+        if (isActive) {
+          setResolvedCancelTargetOptions([]);
+        }
+      } finally {
+        if (isActive) {
+          setIsLoadingCancelTargetOptions(false);
+        }
+      }
+    }
+
+    void loadCancelTargetOptions();
+
+    return () => {
+      isActive = false;
+    };
+  }, [mode, cancelTargetOptions]);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  const safeSetSubmissionStage = (value: SubmissionStage) => {
+    if (isMountedRef.current) {
+      setSubmissionStage(value);
+    }
+  };
+
+  const safeSetSubmissionError = (value: string | null) => {
+    if (isMountedRef.current) {
+      setSubmissionError(value);
+    }
+  };
+
+  const safeSetDelegationStage = (value: DelegationStage) => {
+    if (isMountedRef.current) {
+      setDelegationStage(value);
+    }
+  };
+
+  const safeSetDelegationError = (value: string | null) => {
+    if (isMountedRef.current) {
+      setDelegationError(value);
+    }
+  };
+
+  const safeSetStoredProposalLifecycle = (
+    value: StoredProposalLifecycle | null,
+  ) => {
+    if (isMountedRef.current) {
+      setStoredProposalLifecycle(value);
+    }
+  };
+
+  const safeSetGovernorTxHash = (value: string | null) => {
+    if (isMountedRef.current) {
+      setGovernorTxHash(value);
+    }
+  };
 
   const returnHref = getProposalReturnHref(origin);
   const proposalKind = mode === "cancel" ? "cancel" : "standard";
@@ -316,10 +628,10 @@ export default function CreateProposalClient({
 
   const selectedCanceledProposal = useMemo(
     () =>
-      cancelTargetOptions.find(
+      resolvedCancelTargetOptions.find(
         (item) => item.proposalId === selectedCanceledProposalId,
       ) ?? null,
-    [cancelTargetOptions, selectedCanceledProposalId],
+    [resolvedCancelTargetOptions, selectedCanceledProposalId],
   );
 
   const effectiveCategory =
@@ -331,6 +643,12 @@ export default function CreateProposalClient({
     proposalText,
     details,
   });
+
+  const hasCancelSelection =
+    mode === "cancel" ? Boolean(selectedCanceledProposalId) : true;
+
+  const hasResolvedCancelSelection =
+    mode === "cancel" ? Boolean(selectedCanceledProposal) : true;
 
   const action = useMemo(
     () =>
@@ -349,13 +667,6 @@ export default function CreateProposalClient({
   const isDelegationBusy =
     delegationStage === "wallet" || delegationStage === "pending";
 
-  const isSubmissionSuccess =
-    submissionStage === "idle" &&
-    !isReviewOpen &&
-    hasMetadataWriteStarted &&
-    !submissionError &&
-    hasCreatedProposalId;
-
   const readinessState = useMemo(() => {
     if (accountReadiness.isCheckingAccount) {
       return {
@@ -367,16 +678,7 @@ export default function CreateProposalClient({
       };
     }
 
-    if (!accountReadiness.isAccountReadyFromAppState) {
-      return {
-        label: "Setup required",
-        description: "We’re still preparing your account for governance.",
-        canReview: false,
-        needsDelegation: false,
-      };
-    }
-
-    if (!accountAddress) {
+    if (!accountReadiness.isAccountReadyFromAppState || !accountAddress) {
       return {
         label: "Setup required",
         description: "We’re still preparing your account for governance.",
@@ -483,19 +785,25 @@ export default function CreateProposalClient({
   ]);
 
   function resetSubmissionFlow() {
-    setSubmissionError(null);
-    setStoredProposalLifecycle(null);
-    setHasMetadataWriteStarted(false);
-    setHasCreatedProposalId(false);
-    setGovernorTxHash(null);
+    safeSetSubmissionError(null);
+    safeSetStoredProposalLifecycle(null);
+
+    safeSetGovernorTxHash(null);
     createdProposalIdRef.current = null;
   }
 
   function handleOpenReview() {
     const hasRequiredSelection =
-      mode === "cancel" ? Boolean(selectedCanceledProposal) : Boolean(category);
+      mode === "cancel"
+        ? Boolean(selectedCanceledProposalId)
+        : Boolean(category);
 
-    if (!readinessState.canReview || !hasRequiredSelection) {
+    if (!hasRequiredSelection) {
+      setSubmissionError(
+        mode === "cancel"
+          ? "Select an executed proposal first."
+          : "Select a category first.",
+      );
       return;
     }
 
@@ -503,23 +811,25 @@ export default function CreateProposalClient({
     setSubmissionStage("review");
     setIsReviewOpen(true);
   }
-
   function handleCloseReview() {
     if (isSubmittingProposal) {
       return;
     }
 
+    safeSetSubmissionStage("idle");
     setIsReviewOpen(false);
-    setSubmissionStage("idle");
   }
+
   async function handleEnableProposal() {
-    if (!accountAddress || isDelegationBusy) {
+    if (!accountAddress || isDelegationBusy || delegationLockRef.current) {
       return;
     }
 
+    delegationLockRef.current = true;
+
     try {
-      setDelegationError(null);
-      setDelegationStage("wallet");
+      safeSetDelegationError(null);
+      safeSetDelegationStage("wallet");
 
       const magic = getMagicClient();
       const provider = new BrowserProvider(magic.rpcProvider);
@@ -532,21 +842,59 @@ export default function CreateProposalClient({
         signer,
       );
 
-      setDelegationStage("pending");
+      safeSetDelegationStage("pending");
 
       const tx = await governanceTokenContract.delegate(accountAddress);
 
       await waitForReceiptWithFallback(tx.hash, receiptProvider, 90_000);
 
+      async function waitForVotingPowerRefresh() {
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          const [balanceResult, delegatesResult, votesResult] =
+            await Promise.all([
+              refetchBalance(),
+              refetchDelegates(),
+              refetchVotes(),
+            ]);
+
+          const nextBalance = balanceResult.data;
+          const nextDelegate = delegatesResult.data;
+          const nextVotes = votesResult.data;
+
+          const hasBalance =
+            (typeof nextBalance === "bigint" ||
+              typeof nextBalance === "number") &&
+            nextBalance > 0;
+
+          const isSelfDelegated =
+            typeof nextDelegate === "string" &&
+            accountAddress !== null &&
+            nextDelegate.toLowerCase() === accountAddress.toLowerCase();
+
+          const hasVotes =
+            (typeof nextVotes === "bigint" || typeof nextVotes === "number") &&
+            (typeof proposalThreshold === "bigint" ||
+              typeof proposalThreshold === "number") &&
+            nextVotes >= proposalThreshold;
+
+          if (hasBalance && isSelfDelegated && hasVotes) {
+            return;
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+      }
+
+      await waitForVotingPowerRefresh();
       await Promise.all([refetchBalance(), refetchDelegates(), refetchVotes()]);
 
-      setDelegationStage("idle");
+      safeSetDelegationStage("idle");
     } catch (error) {
       console.error("SELF_DELEGATION_WRITE_ERROR", error);
-      setDelegationStage("error");
-      setDelegationError(
-        error instanceof Error ? error.message : "Something went wrong.",
-      );
+      safeSetDelegationStage("error");
+      safeSetDelegationError(normalizeSubmissionError(error));
+    } finally {
+      delegationLockRef.current = false;
     }
   }
 
@@ -555,10 +903,16 @@ export default function CreateProposalClient({
       return;
     }
 
+    if (submitLockRef.current) {
+      return;
+    }
+
     if (mode === "cancel" && !selectedCanceledProposal) {
       setSubmissionError("Select an executed proposal to cancel.");
       return;
     }
+
+    submitLockRef.current = true;
 
     try {
       resetSubmissionFlow();
@@ -614,6 +968,26 @@ export default function CreateProposalClient({
         proposalDescription,
       ]);
 
+      const estimatedGas = await receiptProvider.estimateGas({
+        from: accountAddress,
+        to: MY_GOVERNOR_ADDRESS,
+        data: txData,
+        value: BigInt(0),
+        maxFeePerGas: feeData.maxFeePerGas ?? undefined,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?? undefined,
+      });
+
+      const nativeBalance = await receiptProvider.getBalance(accountAddress);
+      const maxFeePerGas =
+        feeData.maxFeePerGas ?? feeData.gasPrice ?? BigInt(0);
+      const estimatedNetworkCost = estimatedGas * maxFeePerGas;
+
+      if (nativeBalance < estimatedNetworkCost) {
+        throw new Error(
+          `insufficient funds for gas * price + value: have ${nativeBalance.toString()} want ${estimatedNetworkCost.toString()}`,
+        );
+      }
+
       const governorTx = await signer.sendTransaction({
         to: MY_GOVERNOR_ADDRESS,
         data: txData,
@@ -649,10 +1023,9 @@ export default function CreateProposalClient({
       }
 
       createdProposalIdRef.current = proposalId;
-      setHasCreatedProposalId(true);
+
       setStoredProposalLifecycle({ proposalId });
 
-      setHasMetadataWriteStarted(true);
       setSubmissionStage("saving-metadata");
 
       const response = await fetch("/api/proposals", {
@@ -681,129 +1054,72 @@ export default function CreateProposalClient({
             mode === "cancel" ? selectedCanceledProposal?.title ?? null : null,
         }),
       });
-
       if (!response.ok) {
         throw new Error("Proposal metadata request failed.");
       }
 
-      await fetch("/api/revalidate-governance", {
+      setIsReviewOpen(false);
+
+      void fetch("/api/revalidate-governance", {
         method: "POST",
       });
 
-      setIsReviewOpen(false);
-      setSubmissionStage("idle");
-
-      const destination = `${returnHref}?created=${proposalId.toString()}`;
-      router.replace(destination);
-      router.refresh();
+      window.location.assign(`${returnHref}?created=${proposalId.toString()}`);
+      return;
     } catch (error) {
       console.error("GOVERNOR_PROPOSAL_SUBMISSION_ERROR", error);
 
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        error.code === "REPLACEMENT_UNDERPRICED"
-      ) {
+      if (governorTxHash || createdProposalIdRef.current) {
         setSubmissionStage("error");
         setSubmissionError(
-          "A previous wallet transaction appears to still be active in the provider. Please wait a moment and try again.",
+          `The blockchain transaction may already have succeeded, but the final save step did not complete cleanly. ${
+            createdProposalIdRef.current
+              ? `Proposal ID: ${createdProposalIdRef.current.toString()}. `
+              : ""
+          }Please do not resubmit immediately.`,
         );
         return;
       }
 
-      if (
-        error instanceof Error &&
-        error.message.toLowerCase().includes("replacement fee too low")
-      ) {
-        setSubmissionStage("error");
-        setSubmissionError(
-          "The wallet provider rejected this transaction as a nonce replacement. Please wait a moment and try again.",
-        );
-        return;
-      }
+      const maybeData = getRpcErrorData(error);
 
-      if (error && typeof error === "object") {
-        const maybeData =
-          "data" in error && typeof error.data === "string"
-            ? error.data
-            : "info" in error &&
-              error.info &&
-              typeof error.info === "object" &&
-              "error" in error.info &&
-              error.info.error &&
-              typeof error.info.error === "object" &&
-              "data" in error.info.error &&
-              typeof error.info.error.data === "string"
-            ? error.info.error.data
-            : null;
+      if (maybeData) {
+        try {
+          const decodedGovernorError = new Interface(myGovernorAbi).parseError(
+            maybeData,
+          );
 
-        if (maybeData) {
-          try {
-            const decodedGovernorError = new Interface(
-              myGovernorAbi,
-            ).parseError(maybeData);
+          console.error(
+            "DECODED_GOVERNOR_ERROR_NAME",
+            decodedGovernorError?.name,
+          );
+          console.error(
+            "DECODED_GOVERNOR_ERROR_ARGS",
+            decodedGovernorError?.args,
+          );
+          console.error(
+            "DECODED_GOVERNOR_ERROR_SIGNATURE",
+            decodedGovernorError?.signature,
+          );
+        } catch (decodeGovernorError) {
+          console.error("FAILED_TO_DECODE_GOVERNOR_ERROR", decodeGovernorError);
+        }
 
-            console.error(
-              "DECODED_GOVERNOR_ERROR_NAME",
-              decodedGovernorError?.name,
-            );
-            console.error(
-              "DECODED_GOVERNOR_ERROR_ARGS",
-              decodedGovernorError?.args,
-            );
-            console.error(
-              "DECODED_GOVERNOR_ERROR_SIGNATURE",
-              decodedGovernorError?.signature,
-            );
-          } catch (decodeGovernorError) {
-            console.error(
-              "FAILED_TO_DECODE_GOVERNOR_ERROR",
-              decodeGovernorError,
-            );
-          }
-
-          try {
-            const decodedTokenError = new Interface(
-              governanceTokenAbi,
-            ).parseError(maybeData);
-            console.error("DECODED_TOKEN_ERROR", decodedTokenError);
-          } catch (decodeTokenError) {
-            console.error("FAILED_TO_DECODE_TOKEN_ERROR", decodeTokenError);
-          }
+        try {
+          const decodedTokenError = new Interface(
+            governanceTokenAbi,
+          ).parseError(maybeData);
+          console.error("DECODED_TOKEN_ERROR", decodedTokenError);
+        } catch (decodeTokenError) {
+          console.error("FAILED_TO_DECODE_TOKEN_ERROR", decodeTokenError);
         }
       }
 
       setSubmissionStage("error");
-      setSubmissionError(
-        error instanceof Error
-          ? error.message
-          : "We could not create your proposal.",
-      );
+      setSubmissionError(normalizeSubmissionError(error));
+    } finally {
+      submitLockRef.current = false;
     }
-  }
-
-  if (isSubmissionSuccess) {
-    return (
-      <div className="dashboard-section-stack">
-        <div className="empty-state empty-state--compact">
-          <div className="empty-state__icon" aria-hidden="true">
-            ✓
-          </div>
-          <h2>Proposal submitted</h2>
-          <p>
-            Your proposal has been created and its details were saved
-            successfully. It will appear in the proposals list in a pending
-            state.
-          </p>
-          <div className="dashboard-cta-card__actions">
-            <Link href={returnHref} className="button button--primary">
-              Back to previous page
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
   }
 
   const showDelegationHelper =
@@ -820,12 +1136,10 @@ export default function CreateProposalClient({
     : "Accept and continue";
 
   const isReviewDisabled =
-    !readinessState.canReview ||
-    !effectiveCategory ||
     proposalText.trim().length === 0 ||
     isSubmittingProposal ||
     isDelegationBusy ||
-    (mode === "cancel" && !selectedCanceledProposal);
+    (mode === "cancel" ? !hasCancelSelection : !category);
 
   return (
     <>
@@ -861,6 +1175,10 @@ export default function CreateProposalClient({
                   setSelectedCanceledProposalId(event.target.value)
                 }
                 required
+                disabled={isLoadingCancelTargetOptions}
+                aria-invalid={Boolean(
+                  submissionError && !selectedCanceledProposalId,
+                )}
                 style={{
                   padding: "12px 14px",
                   borderRadius: 12,
@@ -869,8 +1187,12 @@ export default function CreateProposalClient({
                   fontSize: 16,
                 }}
               >
-                <option value="">Select an executed proposal</option>
-                {cancelTargetOptions.map((option) => (
+                <option value="">
+                  {isLoadingCancelTargetOptions
+                    ? "Loading executed proposals..."
+                    : "Select an executed proposal"}
+                </option>
+                {resolvedCancelTargetOptions.map((option) => (
                   <option key={option.proposalId} value={option.proposalId}>
                     {option.title}
                   </option>
@@ -886,6 +1208,7 @@ export default function CreateProposalClient({
                   setCategory(event.target.value as ProposalCategory | "")
                 }
                 required
+                aria-invalid={Boolean(submissionError && !category)}
                 style={{
                   padding: "12px 14px",
                   borderRadius: 12,
@@ -904,7 +1227,9 @@ export default function CreateProposalClient({
             </label>
           )}
 
-          {mode === "cancel" && selectedCanceledProposal ? (
+          {mode === "cancel" &&
+          hasResolvedCancelSelection &&
+          selectedCanceledProposal ? (
             <div
               style={{
                 display: "grid",
@@ -984,48 +1309,38 @@ export default function CreateProposalClient({
             />
           </label>
 
-          {delegationError ? (
-            <p style={{ color: "rgb(185, 28, 28)" }}>{delegationError}</p>
-          ) : null}
+          {delegationError ? <InlineMessage message={delegationError} /> : null}
 
-          {submissionError ? (
-            <p style={{ color: "rgb(185, 28, 28)" }}>{submissionError}</p>
-          ) : null}
+          {submissionError ? <InlineMessage message={submissionError} /> : null}
 
           {showDelegationHelper ? (
-            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Action needed to continue.
-            </p>
+            <InlineMessage tone="info" message="Action needed to continue." />
           ) : null}
 
           {showSubmissionWalletHelper ? (
-            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Action needed in confirmation modal.
-            </p>
+            <InlineMessage
+              tone="info"
+              message="Action needed in confirmation modal."
+            />
           ) : null}
 
           {submissionStage === "creating-proposal" ? (
-            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Creating your proposal.
-            </p>
+            <InlineMessage tone="info" message="Creating your proposal." />
           ) : null}
 
           {showSavingMetadataHelper ? (
-            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Saving proposal details.
-            </p>
+            <InlineMessage tone="info" message="Saving proposal details." />
           ) : null}
 
           {storedProposalLifecycle?.proposalId ? (
-            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Proposal ID ready: {storedProposalLifecycle.proposalId.toString()}
-            </p>
+            <InlineMessage
+              tone="info"
+              message={`Proposal ID ready: ${storedProposalLifecycle.proposalId.toString()}`}
+            />
           ) : null}
 
           {governorTxHash ? (
-            <p style={{ color: "rgba(15, 23, 42, 0.72)" }}>
-              Proposal submitted.
-            </p>
+            <InlineMessage tone="info" message="Proposal submitted." />
           ) : null}
 
           <div
@@ -1035,9 +1350,13 @@ export default function CreateProposalClient({
               flexWrap: "wrap",
             }}
           >
-            <Link href={returnHref} className="button button--secondary">
+            <button
+              type="button"
+              onClick={() => router.back()}
+              className="button button--secondary"
+            >
               Cancel
-            </Link>
+            </button>
 
             {readinessState.needsDelegation ? (
               <button
@@ -1127,7 +1446,9 @@ export default function CreateProposalClient({
                 </p>
               </div>
 
-              {mode === "cancel" && selectedCanceledProposal ? (
+              {mode === "cancel" &&
+              hasResolvedCancelSelection &&
+              selectedCanceledProposal ? (
                 <div>
                   <p style={{ fontSize: 14, color: "rgba(15, 23, 42, 0.72)" }}>
                     Executed proposal to cancel
@@ -1156,27 +1477,31 @@ export default function CreateProposalClient({
             </div>
 
             {submissionError ? (
-              <p style={{ color: "rgb(185, 28, 28)", margin: 0 }}>
-                {submissionError}
-              </p>
+              <InlineMessage message={submissionError} margin={0} />
             ) : null}
 
             {showSubmissionWalletHelper ? (
-              <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
-                Action needed in confirmation modal.
-              </p>
+              <InlineMessage
+                tone="info"
+                message="Action needed in confirmation modal."
+                margin={0}
+              />
             ) : null}
 
             {submissionStage === "creating-proposal" ? (
-              <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
-                Creating your proposal.
-              </p>
+              <InlineMessage
+                tone="info"
+                message="Creating your proposal."
+                margin={0}
+              />
             ) : null}
 
             {showSavingMetadataHelper ? (
-              <p style={{ color: "rgba(15, 23, 42, 0.72)", margin: 0 }}>
-                Saving proposal details.
-              </p>
+              <InlineMessage
+                tone="info"
+                message="Saving proposal details."
+                margin={0}
+              />
             ) : null}
 
             <div
@@ -1202,7 +1527,11 @@ export default function CreateProposalClient({
                 onClick={() => {
                   void handleSubmitGovernorProposal();
                 }}
-                disabled={isSubmittingProposal || !effectiveCategory}
+                disabled={
+                  isSubmittingProposal ||
+                  !effectiveCategory ||
+                  (mode === "cancel" && !hasResolvedCancelSelection)
+                }
               >
                 {reviewButtonLabel}
               </button>

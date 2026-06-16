@@ -556,7 +556,7 @@ async function enrichProposal(
 
     let snapshotVotes = BigInt(0);
 
-    if (snapshot <= tokenClock) {
+    if (snapshot < tokenClock) {
       try {
         snapshotVotes = await withRpcRetry(
           () =>
