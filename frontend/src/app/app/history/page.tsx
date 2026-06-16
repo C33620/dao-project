@@ -1,6 +1,6 @@
+import { GovernanceActivityPreview } from "@/components/governance/governance-activity-preview";
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
-import { getProposalCategoryLabel } from "@/lib/governance/create-proposal";
 import { getRecentGovernanceActivity } from "@/lib/services/proposals";
 
 export default async function HistoryPage() {
@@ -13,76 +13,11 @@ export default async function HistoryPage() {
           title="Executed proposals"
           description="Only proposals that reached execution appear here, newest first."
         >
-          <div className="activity-feed">
-            {activity.length > 0 ? (
-              activity.map((item) => {
-                const isDanger = item.tone === "danger";
-
-                return (
-                  <article
-                    key={item.id}
-                    className="activity-feed__item"
-                    style={
-                      isDanger
-                        ? {
-                            gridTemplateColumns: "16px 1fr",
-                          }
-                        : undefined
-                    }
-                  >
-                    <div
-                      className="activity-feed__marker"
-                      aria-hidden="true"
-                      style={
-                        isDanger
-                          ? {
-                              background: "var(--danger)",
-                              opacity: 0.9,
-                            }
-                          : undefined
-                      }
-                    />
-                    <div
-                      className="activity-feed__content"
-                      style={
-                        isDanger
-                          ? {
-                              borderColor: "rgba(185, 48, 72, 0.24)",
-                              background: "rgba(250, 237, 241, 0.62)",
-                            }
-                          : undefined
-                      }
-                    >
-                      <div className="activity-feed__topline">
-                        <h3>{item.title}</h3>
-                        <span>{item.occurredAt}</span>
-                      </div>
-                      <p>{item.description}</p>
-                      {item.relatedProposalCategory ? (
-                        <p>
-                          Category:{" "}
-                          {getProposalCategoryLabel(
-                            item.relatedProposalCategory,
-                          )}
-                        </p>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              })
-            ) : (
-              <div className="empty-state empty-state--compact">
-                <div className="empty-state__icon" aria-hidden="true">
-                  ≣
-                </div>
-                <h2>No executed proposals yet</h2>
-                <p>
-                  Proposals will appear here once they complete the governance
-                  lifecycle and are executed onchain.
-                </p>
-              </div>
-            )}
-          </div>
+          <GovernanceActivityPreview
+            items={activity}
+            emptyTitle="No executed proposals yet"
+            emptyDescription="Proposals will appear here once they complete the governance lifecycle and are executed onchain."
+          />
         </SectionCard>
       </div>
     </PageShell>

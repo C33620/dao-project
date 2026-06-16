@@ -1,15 +1,10 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { ProposalCard } from "@/components/governance/proposal-card";
-import { VoteActionCard } from "@/components/governance/vote-action-card";
 import { getMagicWalletClient } from "@/lib/web3/magic-wallet-client";
-import type {
-  ProposalActionState,
-  ProposalDetail,
-  ProposalSummary,
-  VoteSupport,
-} from "@/types/governance";
-import { useEffect, useRef, useState } from "react";
+import type { ProposalSummary, VoteSupport } from "@/types/governance";
+import { useCallback, useState } from "react";
 import { createPublicClient, erc20Abi, http } from "viem";
 import { sepolia } from "viem/chains";
 
@@ -17,11 +12,6 @@ type ProposalListProps = {
   proposals: ProposalSummary[];
   emptyTitle?: string;
   emptyDescription?: string;
-};
-
-type VoteFlowResponse = {
-  proposal: ProposalDetail;
-  actionState: ProposalActionState;
 };
 
 type GovernanceFeedbackState = {
@@ -65,10 +55,15 @@ const MASTER_WALLET_ADDRESS = process.env.NEXT_PUBLIC_MASTER_WALLET_ADDRESS;
 const REBALANCE_GUARD_KEY = "governance-rebalance-guard";
 const REBALANCE_PENDING_KEY = "governance-rebalance-pending";
 
-const publicClient = createPublicClient({
-  chain: sepolia,
-  transport: http(),
-});
+const ProposalVoteModal = dynamic(
+  () =>
+    import("@/components/governance/proposal-vote-modal").then(
+      (mod) => mod.ProposalVoteModal,
+    ),
+  {
+    ssr: false,
+  },
+);
 
 function readRebalanceGuard(): RebalanceGuard | null {
   if (typeof window === "undefined") {
@@ -138,25 +133,27 @@ export function ProposalList({
   emptyTitle = "Nothing to review right now",
   emptyDescription = "When new items are ready for you, they will appear here.",
 }: ProposalListProps) {
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedProposal, setSelectedProposal] =
-    useState<ProposalDetail | null>(null);
-  const [selectedActionState, setSelectedActionState] =
-    useState<ProposalActionState | null>(null);
+  const [selectedVoteIntent, setSelectedVoteIntent] = useState<{
+    proposalId: string;
+    support: VoteSupport;
+  } | null>(null);
 
-  const [isLoadingVoteFlow, setIsLoadingVoteFlow] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [optimisticallyVotedIds, setOptimisticallyVotedIds] = useState<
     Set<string>
   >(new Set());
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+
   const [governanceFeedback, setGovernanceFeedback] =
     useState<GovernanceFeedbackState>({
       type: null,
       message: "",
     });
 
-  async function runGovernancePrecheck() {
+  const runGovernancePrecheck = useCallback(async () => {
+    const publicClient = createPublicClient({
+      chain: sepolia,
+      transport: http(),
+    });
+
     if (!GOVERNANCE_TOKEN_ADDRESS || !MASTER_WALLET_ADDRESS) {
       throw new Error("Governance token configuration is incomplete.");
     }
@@ -210,8 +207,7 @@ export function ProposalList({
       setGovernanceFeedback({
         type: "success",
         message:
-          `Excess governance tokens were returned to the treasury. ` +
-          `Your account is now rebalanced, but you must wait for the next proposal snapshot before voting.`,
+          "Excess governance tokens were returned to the treasury. Your account is now rebalanced, but you must wait for the next proposal snapshot before voting.",
       });
 
       return { allowed: false as const };
@@ -241,138 +237,61 @@ export function ProposalList({
       setGovernanceFeedback({
         type: "info",
         message: deficitData.queued
-          ? `Your account is below the governance balance target. An admin funding item has been queued. You can vote after the top-up is completed and the next snapshot is reached.`
-          : `Your account is below the governance balance target. Please wait for admin funding before voting.`,
+          ? "Your account is below the governance balance target. An admin funding item has been queued. You can vote after the top-up is completed and the next snapshot is reached."
+          : "Your account is below the governance balance target. Please wait for admin funding before voting.",
       });
 
       return { allowed: false as const };
     }
 
     return { allowed: true as const };
-  }
+  }, []);
 
-  async function handleVoteClick(proposalId: string, support: VoteSupport) {
-    setGovernanceFeedback({ type: null, message: "" });
+  const handleVoteClick = useCallback(
+    async (proposalId: string, support: VoteSupport) => {
+      setGovernanceFeedback({ type: null, message: "" });
 
-    try {
-      const precheck = await runGovernancePrecheck();
+      try {
+        const precheck = await runGovernancePrecheck();
 
-      if (!precheck.allowed) {
-        return;
-      }
-    } catch (error) {
-      setGovernanceFeedback({
-        type: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "We could not verify your governance balance.",
-      });
-      return;
-    }
-
-    setIsModalOpen(true);
-    setIsLoadingVoteFlow(true);
-    setLoadError(null);
-    setSelectedProposal(null);
-    setSelectedActionState(null);
-
-    try {
-      const response = await fetch(`/api/proposals/${proposalId}/vote-flow`, {
-        method: "GET",
-        cache: "no-store",
-      });
-
-      if (!response.ok) {
-        throw new Error("Unable to load this proposal for voting.");
-      }
-
-      const data = (await response.json()) as VoteFlowResponse;
-
-      console.log("vote-flow proposal", data.proposal);
-      console.log("snapshotBlock", data.proposal.governance?.snapshotBlock);
-
-      const snapshotBlock = data.proposal.governance?.snapshotBlock;
-
-      if (hasPendingRebalance() && snapshotBlock) {
-        writeRebalanceGuard(snapshotBlock);
-        clearPendingRebalance();
-      }
-
-      const guard = readRebalanceGuard();
-
-      if (guard && snapshotBlock) {
-        const currentSnapshot = BigInt(snapshotBlock);
-        const blockedUntilAfter = BigInt(guard.snapshotBlock);
-
-        if (currentSnapshot <= blockedUntilAfter) {
-          closeModal();
-          setGovernanceFeedback({
-            type: "info",
-            message:
-              "Your wallet was rebalanced. You must wait for a proposal with a newer snapshot before voting.",
-          });
+        if (!precheck.allowed) {
           return;
         }
-
-        clearRebalanceGuard();
+      } catch (error) {
+        setGovernanceFeedback({
+          type: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "We could not verify your governance balance.",
+        });
+        return;
       }
 
-      setSelectedProposal(data.proposal);
-      setSelectedActionState({
-        ...data.actionState,
-        vote: {
-          ...data.actionState.vote,
-          selectedSupport: support,
-        },
-      });
-    } catch (error) {
-      setLoadError(
-        error instanceof Error
-          ? error.message
-          : "We could not prepare the voting flow.",
-      );
-    } finally {
-      setIsLoadingVoteFlow(false);
-    }
-  }
+      setSelectedVoteIntent({ proposalId, support });
+    },
+    [runGovernancePrecheck],
+  );
 
-  function closeModal() {
-    setIsModalOpen(false);
-    setSelectedProposal(null);
-    setSelectedActionState(null);
-    setLoadError(null);
-  }
+  const handleCloseModal = useCallback(() => {
+    setSelectedVoteIntent(null);
+  }, []);
 
-  function handleVoteSuccess(proposalId: string) {
+  const handleVoteSuccess = useCallback((proposalId: string) => {
     setOptimisticallyVotedIds((current) => {
       const next = new Set(current);
       next.add(proposalId);
       return next;
     });
-    closeModal();
-  }
+    setSelectedVoteIntent(null);
+  }, []);
 
-  useEffect(() => {
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        closeModal();
-      }
-    }
-
-    if (isModalOpen) {
-      window.addEventListener("keydown", handleEscape);
-      document.body.style.overflow = "hidden";
-      window.setTimeout(() => {
-        closeButtonRef.current?.focus();
-      }, 0);
-    }
-
-    return () => {
-      window.removeEventListener("keydown", handleEscape);
-      document.body.style.overflow = "";
-    };
-  }, [isModalOpen]);
+  const handleGovernanceFeedback = useCallback(
+    (value: GovernanceFeedbackState) => {
+      setGovernanceFeedback(value);
+    },
+    [],
+  );
 
   if (proposals.length === 0) {
     return (
@@ -429,60 +348,19 @@ export function ProposalList({
         </div>
       </section>
 
-      {isModalOpen ? (
-        <div
-          className="proposal-vote-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="proposal-vote-modal-title"
-          onClick={closeModal}
-        >
-          <div
-            className="proposal-vote-modal__surface"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="proposal-vote-modal__header">
-              <div>
-                <p className="wallet-status__label">Vote on proposal</p>
-                <h2
-                  id="proposal-vote-modal-title"
-                  className="proposal-card__title"
-                >
-                  {selectedProposal?.title ?? "Loading proposal"}
-                </h2>
-              </div>
-
-              <button
-                ref={closeButtonRef}
-                type="button"
-                className="proposal-card__button proposal-card__button--secondary"
-                onClick={closeModal}
-              >
-                Close
-              </button>
-            </div>
-
-            {isLoadingVoteFlow ? (
-              <div className="action-panel action-panel--interactive">
-                <p className="wallet-status__label">Preparing vote</p>
-                <p className="wallet-status__value">
-                  Loading proposal details...
-                </p>
-              </div>
-            ) : loadError ? (
-              <div className="action-panel action-panel--interactive">
-                <p className="wallet-status__label">Could not open vote flow</p>
-                <p className="wallet-status__value">{loadError}</p>
-              </div>
-            ) : selectedProposal && selectedActionState ? (
-              <VoteActionCard
-                proposal={selectedProposal}
-                initialActionState={selectedActionState}
-                onVoteSuccess={handleVoteSuccess}
-              />
-            ) : null}
-          </div>
-        </div>
+      {selectedVoteIntent ? (
+        <ProposalVoteModal
+          proposalId={selectedVoteIntent.proposalId}
+          support={selectedVoteIntent.support}
+          onClose={handleCloseModal}
+          onVoteSuccess={handleVoteSuccess}
+          onGovernanceFeedback={handleGovernanceFeedback}
+          hasPendingRebalance={hasPendingRebalance}
+          writeRebalanceGuard={writeRebalanceGuard}
+          clearPendingRebalance={clearPendingRebalance}
+          readRebalanceGuard={readRebalanceGuard}
+          clearRebalanceGuard={clearRebalanceGuard}
+        />
       ) : null}
     </>
   );

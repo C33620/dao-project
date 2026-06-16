@@ -1,6 +1,6 @@
-import { Suspense } from "react";
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
+import { Suspense } from "react";
 import { CancelProposalEntryCard } from "./components/cancel-proposal-entry-card";
 import { CreateProposalEntryCard } from "./components/create-proposal-entry-card";
 import { ProposalsAutoRefresh } from "./components/proposals-auto-refresh";

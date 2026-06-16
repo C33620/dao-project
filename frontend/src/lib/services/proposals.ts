@@ -940,6 +940,34 @@ async function getQueueableProposalsUncached(): Promise<ProposalSummary[]> {
     .map((proposal) => proposal.summary);
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+
+      if (currentIndex >= items.length) {
+        break;
+      }
+
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, () => worker()),
+  );
+
+  return results;
+}
+
 async function getProposalsUncached(
   filter: ProposalFilterOption = "all",
 ): Promise<ProposalSummary[]> {
@@ -949,18 +977,17 @@ async function getProposalsUncached(
     buildUserGovernanceContext(),
   ]);
 
-  const enriched: EnrichedProposal[] = [];
-
-  for (const record of records) {
+  const enriched = await mapWithConcurrency(records, 3, async (record) => {
     try {
-      const proposal = await enrichProposal(record, sharedContext, userContext);
-      enriched.push(proposal);
+      return await enrichProposal(record, sharedContext, userContext);
     } catch (error) {
       console.error("GET_PROPOSALS_ENRICH_ERROR", record.proposalId, error);
+      return null;
     }
-  }
+  });
 
   return enriched
+    .filter((proposal): proposal is EnrichedProposal => proposal !== null)
     .filter((proposal) => includeByFilter(proposal, filter))
     .map((proposal) => proposal.summary);
 }

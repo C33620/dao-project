@@ -1,5 +1,6 @@
 import { SectionCard } from "@/components/ui/section-card";
 
+
 export function ProposalsListSkeleton() {
   return (
     <div aria-busy="true" aria-live="polite">

@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
 
 type AppHeaderProps = {
@@ -38,7 +38,6 @@ const titles: Record<string, { title: string; subtitle: string }> = {
 
 export function AppHeader({ onMenuClick }: AppHeaderProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const [isSigningOut, setIsSigningOut] = useState(false);
 
   const routeMeta = useMemo(() => {
@@ -62,7 +61,7 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
     setIsSigningOut(true);
 
     try {
-      await fetch("/api/auth", {
+      const response = await fetch("/api/auth", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -70,8 +69,11 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
         body: JSON.stringify({ action: "sign-out" }),
       });
 
-      router.replace("/");
-      router.refresh();
+      if (!response.ok) {
+        throw new Error("Could not sign out.");
+      }
+
+      window.location.replace("/");
     } finally {
       setIsSigningOut(false);
     }

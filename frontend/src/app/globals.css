@@ -718,7 +718,12 @@ main {
   color: var(--info);
 }
 
-.two-column-layout,
+.two-column-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
 .settings-layout {
   display: grid;
   gap: 1.25rem;
@@ -2873,5 +2878,22 @@ main {
 @media (prefers-reduced-motion: reduce) {
   .proposal-skeleton {
     animation: none;
+  }
+}
+
+.dashboard-actionable-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+  width: 100%;
+}
+
+.dashboard-actionable-grid > * {
+  min-width: 0;
+}
+
+@media (max-width: 1360px) {
+  .dashboard-actionable-grid {
+    grid-template-columns: 1fr;
   }
 }

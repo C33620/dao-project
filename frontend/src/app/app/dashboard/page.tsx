@@ -1,11 +1,13 @@
 import { CancelProposalEntryCard } from "@/app/app/proposals/components/cancel-proposal-entry-card";
 import { CreateProposalEntryCard } from "@/app/app/proposals/components/create-proposal-entry-card";
-import { ProposalList } from "@/components/governance/proposal-list";
+import { ActionableProposalsPreview } from "@/components/governance/actionable-proposals-preview";
+import { GovernanceActivityPreview } from "@/components/governance/governance-activity-preview";
 import { PageShell } from "@/components/ui/page-shell";
 import { SectionCard } from "@/components/ui/section-card";
 import { getCurrentUser } from "@/lib/auth";
 import {
   getExecutableProposals,
+  getQueueableProposals,
   getRecentGovernanceActivity,
 } from "@/lib/services/proposals";
 import { ensureLowBalanceGasRefillForUser } from "@/lib/treasury/distribute";
@@ -18,13 +20,14 @@ export default async function DashboardPage() {
     await ensureLowBalanceGasRefillForUser(currentUser.id);
   }
 
-  const [proposalsToValidate, recentActivity] = await Promise.all([
-    getExecutableProposals(),
-    getRecentGovernanceActivity("executed"),
-  ]);
+  const [executableProposals, queueableProposals, recentActivity] =
+    await Promise.all([
+      getExecutableProposals(),
+      getQueueableProposals(),
+      getRecentGovernanceActivity("executed"),
+    ]);
 
   const votedPreview = recentActivity.slice(0, 3);
-  const validationPreview = proposalsToValidate.slice(0, 3);
 
   return (
     <PageShell title="" description="">
@@ -37,6 +40,7 @@ export default async function DashboardPage() {
             <CreateProposalEntryCard origin="proposals" description="" />
           </div>
         </SectionCard>
+
         <SectionCard
           title="Cancel a proposal"
           description="Cancel an existing proposal."
@@ -52,28 +56,11 @@ export default async function DashboardPage() {
             description="A preview of recent governance outcomes."
           >
             <div className="dashboard-section-stack">
-              {votedPreview.length > 0 ? (
-                <div className="activity-preview-list">
-                  {votedPreview.map((item) => (
-                    <article key={item.id} className="activity-preview-item">
-                      <h3>{item.title}</h3>
-                      <p>{item.description}</p>
-                      <span>{item.occurredAt}</span>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-state empty-state--compact">
-                  <div className="empty-state__icon" aria-hidden="true">
-                    ≣
-                  </div>
-                  <h2>No voted proposals yet</h2>
-                  <p>
-                    Recent voted proposals will appear here once activity
-                    exists.
-                  </p>
-                </div>
-              )}
+              <GovernanceActivityPreview
+                items={votedPreview}
+                emptyTitle="No voted proposals yet"
+                emptyDescription="Recent voted proposals will appear here once activity exists."
+              />
 
               <div className="dashboard-section-stack__footer">
                 <Link href="/app/history" className="button button--secondary">
@@ -85,13 +72,12 @@ export default async function DashboardPage() {
 
           <SectionCard
             title="Proposals to validate"
-            description="Active proposals that still need your attention."
+            description="Discover proposals that need action."
           >
             <div className="dashboard-section-stack">
-              <ProposalList
-                proposals={validationPreview}
-                emptyTitle="No proposals need validation right now"
-                emptyDescription="When a proposal becomes active, it will appear here."
+              <ActionableProposalsPreview
+                queueableProposals={queueableProposals}
+                executableProposals={executableProposals}
               />
 
               <div className="dashboard-section-stack__footer">
