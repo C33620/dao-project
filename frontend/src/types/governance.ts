@@ -79,6 +79,7 @@ export type ProposalSummary = {
   canceledProposalTitle?: string;
   cancelHighlightUntil?: string;
   cancelVisibilityState?: CancelVisibilityState;
+  isCanceled: boolean;
 };
 
 export type ProposalDetail = ProposalSummary & {

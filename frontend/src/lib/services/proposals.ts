@@ -473,7 +473,8 @@ async function buildUserGovernanceContext(): Promise<UserGovernanceContext> {
 async function enrichProposal(
   record: StoredProposalRecord,
   sharedContext: SharedGovernanceContext,
-  userContext?: UserGovernanceContext,
+  userContext: UserGovernanceContext | undefined = undefined,
+  canceledTargetIds: Set<string> = new Set(),
 ): Promise<EnrichedProposal> {
   const client = getBlockchainClient();
   const proposalId = BigInt(record.proposalId);
@@ -655,6 +656,7 @@ async function enrichProposal(
 
     kind: proposalKind,
     canceledProposalId: record.canceledProposalId ?? undefined,
+    isCanceled: canceledTargetIds.has(record.proposalId),
     canceledProposalTitle: record.canceledProposalTitle ?? undefined,
     cancelHighlightUntil: record.cancelHighlightUntil
       ? formatReadableDate(record.cancelHighlightUntil)
@@ -977,9 +979,26 @@ async function getProposalsUncached(
     buildUserGovernanceContext(),
   ]);
 
-  const enriched = await mapWithConcurrency(records, 3, async (record) => {
+  const canceledTargetIds = new Set(
+    records
+      .filter(
+        (record) =>
+          record.proposalKind === "cancel" &&
+          typeof record.canceledProposalId === "string" &&
+          record.canceledProposalId.trim().length > 0 &&
+          (record.cancelHighlightUntil || record.cancelHiddenAt),
+      )
+      .map((record) => record.canceledProposalId!.trim()),
+  );
+
+  const enriched = await mapWithConcurrency(records, 1, async (record) => {
     try {
-      return await enrichProposal(record, sharedContext, userContext);
+      return await enrichProposal(
+        record,
+        sharedContext,
+        userContext,
+        canceledTargetIds,
+      );
     } catch (error) {
       console.error("GET_PROPOSALS_ENRICH_ERROR", record.proposalId, error);
       return null;
@@ -1336,6 +1355,7 @@ export async function getCancelableExecutedProposals(): Promise<
     (proposal) =>
       proposal.status === "executed" &&
       proposal.kind !== "cancel" &&
+      !proposal.isCanceled &&
       proposal.cancelVisibilityState !== "hidden",
   );
 }

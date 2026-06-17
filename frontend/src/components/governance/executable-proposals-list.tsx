@@ -71,12 +71,6 @@ export function ExecutableProposalsList({
                   <dt>Executable</dt>
                   <dd>{proposal.executableAt ?? "Waiting"}</dd>
                 </div>
-                {proposal.canceledProposalTitle ? (
-                  <div>
-                    <dt>Cancels</dt>
-                    <dd>{proposal.canceledProposalTitle}</dd>
-                  </div>
-                ) : null}
               </dl>
 
               <div className="proposal-card__action-slot">

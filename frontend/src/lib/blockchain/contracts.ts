@@ -16,5 +16,3 @@ export const governanceContracts: ContractReference[] = [
     abiName: "Treasury",
   },
 ];
-
-// TODO: map deployed contract addresses and ABIs per environment.

@@ -108,6 +108,66 @@ enum ProposalCategory {
   OTHER
 }
 
+enum ProposalSubmissionStatus {
+  DRAFT
+  WALLET_PENDING
+  TX_SUBMITTED
+  TX_CONFIRMED
+  FINALIZING
+  FINALIZED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+model ProposalSubmission {
+  id                    String                   @id @default(auto()) @map("_id") @db.ObjectId
+  idempotencyKey        String                   @unique
+
+  proposerUserId        String?                  @db.ObjectId
+  proposerUser          User?                    @relation(fields: [proposerUserId], references: [id], onDelete: SetNull)
+
+  proposerAddress       String
+  proposerLabel         String
+
+  proposalKind          String                   // "standard" | "cancel"
+  category              ProposalCategory
+  title                 String
+  excerpt               String
+  description           String
+  descriptionHash       String
+
+  canceledProposalId    String?
+  canceledProposalTitle String?
+
+  targets               Json?
+  values                Json?
+  calldatas             Json?
+
+  governorAddress       String
+  registryAddress       String?
+
+  governorTxHash        String?                  @unique
+  proposalId            String?                  @unique
+
+  status                ProposalSubmissionStatus @default(DRAFT)
+  attemptCount          Int                      @default(0)
+
+  submittedAt           DateTime?
+  confirmedAt           DateTime?
+  finalizedAt           DateTime?
+
+  lastErrorCode         String?
+  lastErrorMessage      String?
+
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+
+  @@index([proposerUserId, status])
+  @@index([status, updatedAt])
+  @@index([proposalKind, createdAt])
+  @@index([canceledProposalId])
+}
+
 model AccountCloseAttempt {
   id                            String                     @id @default(auto()) @map("_id") @db.ObjectId
   attemptKey                    String                     @unique
@@ -197,6 +257,7 @@ model User {
   treasuryDistributions   TreasuryDistribution[]
   treasuryAuditLogs       TreasuryAuditLog[]
   proposals               ProposalRecord[]
+  proposalSubmissions ProposalSubmission[]
 }
 
 model InviteCode {
