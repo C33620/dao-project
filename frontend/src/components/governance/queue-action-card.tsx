@@ -1,44 +1,17 @@
 "use client";
 
-import myGovernorAbi from "@/abi/MyGovernor.json";
-import { getMagicClient } from "@/lib/auth/magic-client";
-import { MY_GOVERNOR_ADDRESS } from "@/lib/web3/contracts";
+import { useRef, useState } from "react";
+
+import {
+  normalizeGovernanceActionError,
+  submitGovernanceAction,
+} from "@/lib/governance/governance-action-client";
 import type { ProposalSummary } from "@/types/governance";
-import { BrowserProvider, Contract } from "ethers";
-import { useState } from "react";
 
 type QueueActionCardProps = {
   proposal: ProposalSummary;
   onQueued?: (proposalId: string) => void;
 };
-
-type QueuePayloadResponse = {
-  ok: boolean;
-  payload?: {
-    proposalId: string;
-    description: string;
-    descriptionHash: string;
-    targets: string[];
-    values: string[];
-    calldatas: string[];
-  };
-  error?: string;
-};
-
-async function fetchQueuePayload(proposalId: string) {
-  const response = await fetch(`/api/proposals/${proposalId}/execute-payload`, {
-    method: "GET",
-    cache: "no-store",
-  });
-
-  const data = (await response.json()) as QueuePayloadResponse;
-
-  if (!response.ok || !data.ok || !data.payload) {
-    throw new Error(data.error ?? "Failed to load queue payload.");
-  }
-
-  return data.payload;
-}
 
 export function QueueActionCard({ proposal, onQueued }: QueueActionCardProps) {
   const [status, setStatus] = useState<
@@ -48,13 +21,13 @@ export function QueueActionCard({ proposal, onQueued }: QueueActionCardProps) {
     "This proposal passed and is ready to be queued.",
   );
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [hasSubmittedTx, setHasSubmittedTx] = useState(false);
+  const submitLockRef = useRef(false);
 
   if (proposal.status !== "succeeded") {
     return null;
   }
 
-  const disabled = isSubmitting || hasSubmittedTx;
+  const disabled = isSubmitting || status === "success";
 
   const buttonClassName =
     status === "submitted" || status === "success"
@@ -62,57 +35,37 @@ export function QueueActionCard({ proposal, onQueued }: QueueActionCardProps) {
       : "button-2 button--primary";
 
   async function handleQueue() {
+    if (submitLockRef.current) {
+      return;
+    }
+
+    submitLockRef.current = true;
+
     try {
       setIsSubmitting(true);
       setStatus("submitting");
-      setMessage("Confirm queueing...");
+      setMessage("Confirm queueing in your wallet.");
 
-      const payload = await fetchQueuePayload(proposal.id);
+      const actionPromise = submitGovernanceAction(proposal.id, "queue");
 
-      const magic = getMagicClient();
-      const provider = new BrowserProvider(magic.rpcProvider);
-      const signer = await provider.getSigner();
-
-      const governorContract = new Contract(
-        MY_GOVERNOR_ADDRESS,
-        myGovernorAbi,
-        signer,
-      );
-
-      const tx = await governorContract.queue(
-        payload.targets,
-        payload.values.map((value) => BigInt(value)),
-        payload.calldatas,
-        payload.descriptionHash,
-      );
-
-      setHasSubmittedTx(true);
       setStatus("submitted");
       setMessage("Queue submitted. Waiting for confirmation.");
+
+      await actionPromise;
+
       setIsSubmitting(false);
-
-      const receipt = await tx.wait();
-
-      if (!receipt) {
-        throw new Error("Queue transaction receipt not found.");
-      }
-
       setStatus("success");
-      setMessage("Proposal queued successfully");
+      setMessage("Proposal queued successfully.");
 
       window.setTimeout(() => {
         onQueued?.(proposal.id);
       }, 300);
     } catch (error) {
-      const nextMessage =
-        error instanceof Error
-          ? error.message
-          : "We could not queue this proposal.";
-
       setIsSubmitting(false);
-      setHasSubmittedTx(false);
       setStatus("error");
-      setMessage(nextMessage);
+      setMessage(normalizeGovernanceActionError(error));
+    } finally {
+      submitLockRef.current = false;
     }
   }
 

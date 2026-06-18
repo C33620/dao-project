@@ -1,7 +1,7 @@
 import "server-only";
 
-import governanceTokenAbi from "@/abi/GovernanceToken.json";
-import governorAbi from "@/abi/MyGovernor.json";
+import { governanceTokenAbi } from "@/abi/governance-token";
+import { governorAbi } from "@/abi/my-governor";
 import { getCurrentUser } from "@/lib/auth";
 import { getBlockchainClient } from "@/lib/blockchain/client";
 import { db } from "@/lib/db";
@@ -41,6 +41,40 @@ type GovernorState =
   | "queued"
   | "expired"
   | "executed";
+
+const ESTIMATED_BLOCK_TIME_SECONDS = BigInt(12);
+export const GOVERNANCE_PROPOSALS_TAG = "governance-proposals";
+
+const proposalRecordSelect = {
+  id: true,
+  proposalId: true,
+  title: true,
+  excerpt: true,
+  description: true,
+  descriptionHash: true,
+  category: true,
+  proposerLabel: true,
+  proposerAddress: true,
+  createdAt: true,
+  updatedAt: true,
+  votingStartsAt: true,
+  votingEndsAt: true,
+  queuedAt: true,
+  executableAt: true,
+  executedAt: true,
+  canceledAt: true,
+  defeatedAt: true,
+  governorTxHash: true,
+  governorAddress: true,
+  targets: true,
+  values: true,
+  calldatas: true,
+  proposalKind: true,
+  canceledProposalId: true,
+  canceledProposalTitle: true,
+  cancelHighlightUntil: true,
+  cancelHiddenAt: true,
+} as const;
 
 type StoredProposalRecord = Awaited<
   ReturnType<typeof getStoredProposalRecords>
@@ -82,6 +116,12 @@ type SharedGovernanceContext = {
   currentBlockTimestampSeconds: bigint;
 };
 
+type StoredProposalRecordRow = {
+  proposalId: string;
+  cancelHighlightUntil: Date | null;
+  cancelHiddenAt: Date | null;
+};
+
 type UserGovernanceContext = {
   currentUserWallet: string | null;
   voterContext: {
@@ -89,12 +129,9 @@ type UserGovernanceContext = {
     delegatee: Address;
     currentVotes: bigint;
     balance: bigint;
-    tokenClock: bigint;
+    tokenClock: number;
   } | null;
 };
-
-const ESTIMATED_BLOCK_TIME_SECONDS = BigInt(12);
-export const GOVERNANCE_PROPOSALS_TAG = "governance-proposals";
 
 function mapGovernorState(value: number): GovernorState {
   switch (value) {
@@ -166,43 +203,51 @@ function mapStatus(status: ProposalStatus): {
   }
 }
 
-async function getStoredProposalRecords() {
-  return db.proposalRecord.findMany({
-    orderBy: {
-      createdAt: "desc",
-    },
-    select: {
-      id: true,
-      proposalId: true,
-      title: true,
-      excerpt: true,
-      description: true,
-      descriptionHash: true,
-      category: true,
-      proposerLabel: true,
-      proposerAddress: true,
-      createdAt: true,
-      updatedAt: true,
-      votingStartsAt: true,
-      votingEndsAt: true,
-      queuedAt: true,
-      executableAt: true,
-      executedAt: true,
-      canceledAt: true,
-      defeatedAt: true,
-      governorTxHash: true,
-      governorAddress: true,
-      targets: true,
-      values: true,
-      calldatas: true,
+async function syncExpiredCancellationVisibility<
+  T extends StoredProposalRecordRow,
+>(records: T[]): Promise<T[]> {
+  const now = new Date();
 
-      proposalKind: true,
-      canceledProposalId: true,
-      canceledProposalTitle: true,
-      cancelHighlightUntil: true,
-      cancelHiddenAt: true,
+  const recordsToHide = records.filter(
+    (record) =>
+      record.cancelHighlightUntil &&
+      record.cancelHighlightUntil <= now &&
+      !record.cancelHiddenAt,
+  );
+
+  if (recordsToHide.length === 0) {
+    return records;
+  }
+
+  const proposalIdsToHide = recordsToHide.map((record) => record.proposalId);
+
+  await db.proposalRecord.updateMany({
+    where: {
+      proposalId: { in: proposalIdsToHide },
+      cancelHiddenAt: null,
+    },
+    data: {
+      cancelHiddenAt: now,
     },
   });
+
+  return records.map((record) =>
+    proposalIdsToHide.includes(record.proposalId)
+      ? {
+          ...record,
+          cancelHiddenAt: now,
+        }
+      : record,
+  );
+}
+
+async function getStoredProposalRecords() {
+  const records = await db.proposalRecord.findMany({
+    orderBy: { createdAt: "desc" },
+    select: proposalRecordSelect,
+  });
+
+  return syncExpiredCancellationVisibility(records);
 }
 
 async function getCurrentUserWalletAddress() {
@@ -214,9 +259,7 @@ async function getCurrentUserWalletAddress() {
 
   const fullUser = await db.user.findUnique({
     where: { id: user.id },
-    select: {
-      walletAddress: true,
-    },
+    select: { walletAddress: true },
   });
 
   return fullUser?.walletAddress ?? null;
@@ -310,10 +353,6 @@ function isVisibleInPrimaryLists(proposal: EnrichedProposal) {
   return !proposal.flags.shouldHideFromPrimaryLists;
 }
 
-function isExecutedCancellation(summary: ProposalSummary) {
-  return summary.kind === "cancel" && summary.status === "executed";
-}
-
 function buildCancellationTargetStateMap(enriched: EnrichedProposal[]) {
   const map = new Map<
     string,
@@ -350,10 +389,25 @@ function buildCancellationTargetStateMap(enriched: EnrichedProposal[]) {
   return map;
 }
 
+function isRpcRateLimitError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  return (
+    message.includes("Too Many Requests") ||
+    message.includes("Status: 429") ||
+    message.includes("exceeded its compute units per second capacity") ||
+    message.includes("compute units per second")
+  );
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function withRpcRetry<T>(
   fn: () => Promise<T>,
-  retries = 3,
-  baseDelayMs = 400,
+  retries = 5,
+  baseDelayMs = 1000,
 ): Promise<T> {
   let lastError: unknown;
 
@@ -362,17 +416,15 @@ async function withRpcRetry<T>(
       return await fn();
     } catch (error) {
       lastError = error;
-      const message = error instanceof Error ? error.message : String(error);
-      const isRateLimit =
-        message.includes("Too Many Requests") ||
-        message.includes("Status: 429");
 
-      if (!isRateLimit || attempt === retries) {
+      if (!isRpcRateLimitError(error) || attempt === retries) {
         throw error;
       }
 
-      const delayMs = baseDelayMs * 2 ** attempt;
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      const jitterMs = Math.floor(Math.random() * 250);
+      const delayMs = Math.min(baseDelayMs * 2 ** attempt + jitterMs, 8000);
+
+      await sleep(delayMs);
     }
   }
 
@@ -384,17 +436,13 @@ async function buildSharedGovernanceContext(): Promise<SharedGovernanceContext> 
 
   const [clockModeRaw, currentBlockNumber, currentBlock] = await withRpcRetry(
     async () => {
-      const clockModePromise = client.readContract({
-        address: MY_GOVERNOR_ADDRESS,
-        abi: governorAbi,
-        functionName: "CLOCK_MODE",
-      }) as Promise<string>;
-
-      const blockNumberPromise = client.getBlockNumber();
-
       const [clockMode, blockNumber] = await Promise.all([
-        clockModePromise,
-        blockNumberPromise,
+        client.readContract({
+          address: MY_GOVERNOR_ADDRESS,
+          abi: governorAbi,
+          functionName: "CLOCK_MODE",
+        }),
+        client.getBlockNumber(),
       ]);
 
       const block = await client.getBlock({ blockNumber });
@@ -425,7 +473,7 @@ async function buildUserGovernanceContext(): Promise<UserGovernanceContext> {
 
   const [delegatee, currentVotes, balance, tokenClock] = await withRpcRetry(
     async () => {
-      const results = await client.multicall({
+      return client.multicall({
         contracts: [
           {
             address: GOVERNANCE_TOKEN_ADDRESS,
@@ -450,11 +498,9 @@ async function buildUserGovernanceContext(): Promise<UserGovernanceContext> {
             abi: governanceTokenAbi,
             functionName: "clock",
           },
-        ],
+        ] as const,
         allowFailure: false,
       });
-
-      return results as [Address, bigint, bigint, bigint];
     },
   );
 
@@ -473,15 +519,15 @@ async function buildUserGovernanceContext(): Promise<UserGovernanceContext> {
 async function enrichProposal(
   record: StoredProposalRecord,
   sharedContext: SharedGovernanceContext,
-  userContext: UserGovernanceContext | undefined = undefined,
-  canceledTargetIds: Set<string> = new Set(),
+  userContext?: UserGovernanceContext,
+  canceledTargetIds: ReadonlySet<string> = new Set(),
 ): Promise<EnrichedProposal> {
   const client = getBlockchainClient();
   const proposalId = BigInt(record.proposalId);
 
   const [rawState, snapshot, deadline, eta, needsQueuing, voteTotals] =
     await withRpcRetry(async () => {
-      const results = await client.multicall({
+      return client.multicall({
         contracts: [
           {
             address: MY_GOVERNOR_ADDRESS,
@@ -519,21 +565,12 @@ async function enrichProposal(
             functionName: "proposalVotes",
             args: [proposalId],
           },
-        ],
+        ] as const,
         allowFailure: false,
       });
-
-      return results as [
-        number,
-        bigint,
-        bigint,
-        bigint,
-        boolean,
-        [bigint, bigint, bigint],
-      ];
     });
 
-  const governorState = mapGovernorState(rawState);
+  const governorState = mapGovernorState(Number(rawState));
   const status = governorStateToProposalStatus(governorState);
   const statusView = mapStatus(status);
 
@@ -545,28 +582,26 @@ async function enrichProposal(
     const { voter, delegatee, currentVotes, balance, tokenClock } =
       userContext.voterContext;
 
-    const hasUserVoted = await withRpcRetry(
-      () =>
-        client.readContract({
-          address: MY_GOVERNOR_ADDRESS,
-          abi: governorAbi,
-          functionName: "hasVoted",
-          args: [proposalId, voter],
-        }) as Promise<boolean>,
+    hasVoted = await withRpcRetry(() =>
+      client.readContract({
+        address: MY_GOVERNOR_ADDRESS,
+        abi: governorAbi,
+        functionName: "hasVoted",
+        args: [proposalId, voter],
+      }),
     );
 
     let snapshotVotes = BigInt(0);
 
     if (snapshot < tokenClock) {
       try {
-        snapshotVotes = await withRpcRetry(
-          () =>
-            client.readContract({
-              address: GOVERNANCE_TOKEN_ADDRESS,
-              abi: governanceTokenAbi,
-              functionName: "getPastVotes",
-              args: [voter, snapshot],
-            }) as Promise<bigint>,
+        snapshotVotes = await withRpcRetry(() =>
+          client.readContract({
+            address: GOVERNANCE_TOKEN_ADDRESS,
+            abi: governanceTokenAbi,
+            functionName: "getPastVotes",
+            args: [voter, snapshot],
+          }),
         );
       } catch (error) {
         console.error("GET_PAST_VOTES_READ_ERROR", error);
@@ -574,7 +609,6 @@ async function enrichProposal(
       }
     }
 
-    hasVoted = hasUserVoted;
     userVotingPower = snapshotVotes;
     needsDelegation =
       balance > BigInt(0) &&
@@ -621,9 +655,7 @@ async function enrichProposal(
     record.proposalKind === "cancel" ? "cancel" : "standard";
 
   const isCancellationProposal = proposalKind === "cancel";
-  const isCanceledTarget = Boolean(
-    record.cancelHiddenAt || record.cancelHighlightUntil,
-  );
+  const isCanceledTarget = canceledTargetIds.has(record.proposalId);
   const shouldHideFromPrimaryLists = Boolean(record.cancelHiddenAt);
 
   const actionsLabel = canVote
@@ -651,17 +683,19 @@ async function enrichProposal(
     votingEndsAt,
     queuedAt,
     executableAt,
+    executedAt: record.executedAt
+      ? formatReadableDate(record.executedAt)
+      : undefined,
     actionsLabel,
     hasVoted,
-
     kind: proposalKind,
     canceledProposalId: record.canceledProposalId ?? undefined,
-    isCanceled: canceledTargetIds.has(record.proposalId),
     canceledProposalTitle: record.canceledProposalTitle ?? undefined,
     cancelHighlightUntil: record.cancelHighlightUntil
       ? formatReadableDate(record.cancelHighlightUntil)
       : undefined,
     cancelVisibilityState: record.cancelHiddenAt ? "hidden" : "visible",
+    isCanceled: isCanceledTarget,
   };
 
   const timeline: ProposalDetail["timeline"] = [
@@ -897,22 +931,26 @@ function buildProposalTimeline(
 async function getExecutableProposalsUncached(): Promise<ProposalSummary[]> {
   const records = await getStoredProposalRecords();
   const sharedContext = await buildSharedGovernanceContext();
-  const enriched: EnrichedProposal[] = [];
-
-  for (const record of records) {
-    try {
-      const proposal = await enrichProposal(record, sharedContext);
-      enriched.push(proposal);
-    } catch (error) {
-      console.error(
-        "GET_EXECUTABLE_PROPOSALS_ENRICH_ERROR",
-        record.proposalId,
-        error,
-      );
-    }
-  }
+  const PROPOSAL_ENRICH_CONCURRENCY = 1;
+  const enriched = await mapWithConcurrency(
+    records,
+    PROPOSAL_ENRICH_CONCURRENCY,
+    async (record) => {
+      try {
+        return await enrichProposal(record, sharedContext);
+      } catch (error) {
+        console.error(
+          "GET_EXECUTABLE_PROPOSALS_ENRICH_ERROR",
+          record.proposalId,
+          error,
+        );
+        return null;
+      }
+    },
+  );
 
   return enriched
+    .filter((proposal): proposal is EnrichedProposal => proposal !== null)
     .filter(isVisibleInPrimaryLists)
     .filter((proposal) => proposal.flags.canExecute)
     .map((proposal) => proposal.summary);
@@ -921,22 +959,26 @@ async function getExecutableProposalsUncached(): Promise<ProposalSummary[]> {
 async function getQueueableProposalsUncached(): Promise<ProposalSummary[]> {
   const records = await getStoredProposalRecords();
   const sharedContext = await buildSharedGovernanceContext();
-  const enriched: EnrichedProposal[] = [];
-
-  for (const record of records) {
-    try {
-      const proposal = await enrichProposal(record, sharedContext);
-      enriched.push(proposal);
-    } catch (error) {
-      console.error(
-        "GET_QUEUEABLE_PROPOSALS_ENRICH_ERROR",
-        record.proposalId,
-        error,
-      );
-    }
-  }
+  const PROPOSAL_ENRICH_CONCURRENCY = 1;
+  const enriched = await mapWithConcurrency(
+    records,
+    PROPOSAL_ENRICH_CONCURRENCY,
+    async (record) => {
+      try {
+        return await enrichProposal(record, sharedContext);
+      } catch (error) {
+        console.error(
+          "GET_QUEUEABLE_PROPOSALS_ENRICH_ERROR",
+          record.proposalId,
+          error,
+        );
+        return null;
+      }
+    },
+  );
 
   return enriched
+    .filter((proposal): proposal is EnrichedProposal => proposal !== null)
     .filter(isVisibleInPrimaryLists)
     .filter((proposal) => proposal.flags.canQueue)
     .map((proposal) => proposal.summary);
@@ -990,20 +1032,24 @@ async function getProposalsUncached(
       )
       .map((record) => record.canceledProposalId!.trim()),
   );
-
-  const enriched = await mapWithConcurrency(records, 1, async (record) => {
-    try {
-      return await enrichProposal(
-        record,
-        sharedContext,
-        userContext,
-        canceledTargetIds,
-      );
-    } catch (error) {
-      console.error("GET_PROPOSALS_ENRICH_ERROR", record.proposalId, error);
-      return null;
-    }
-  });
+  const PROPOSAL_ENRICH_CONCURRENCY = 1;
+  const enriched = await mapWithConcurrency(
+    records,
+    PROPOSAL_ENRICH_CONCURRENCY,
+    async (record) => {
+      try {
+        return await enrichProposal(
+          record,
+          sharedContext,
+          userContext,
+          canceledTargetIds,
+        );
+      } catch (error) {
+        console.error("GET_PROPOSALS_ENRICH_ERROR", record.proposalId, error);
+        return null;
+      }
+    },
+  );
 
   return enriched
     .filter((proposal): proposal is EnrichedProposal => proposal !== null)
@@ -1016,46 +1062,72 @@ async function getRecentGovernanceActivityUncached(
 ): Promise<GovernanceActivityItem[]> {
   const records = await getStoredProposalRecords();
   const sharedContext = await buildSharedGovernanceContext();
-  const enriched: EnrichedProposal[] = [];
 
-  for (const record of records) {
-    try {
-      const proposal = await enrichProposal(record, sharedContext);
-      enriched.push(proposal);
-    } catch (error) {
-      console.error(
-        "RECENT_GOVERNANCE_ACTIVITY_ENRICH_ERROR",
-        record.proposalId,
-        error,
-      );
-    }
-  }
+  const canceledTargetIds = new Set(
+    records
+      .filter(
+        (record) =>
+          record.proposalKind === "cancel" &&
+          typeof record.canceledProposalId === "string" &&
+          record.canceledProposalId.trim().length > 0 &&
+          (record.cancelHighlightUntil || record.cancelHiddenAt),
+      )
+      .map((record) => record.canceledProposalId!.trim()),
+  );
+  const PROPOSAL_ENRICH_CONCURRENCY = 1;
+  const enriched = await mapWithConcurrency(
+    records,
+    PROPOSAL_ENRICH_CONCURRENCY,
+    async (record) => {
+      try {
+        return await enrichProposal(
+          record,
+          sharedContext,
+          undefined,
+          canceledTargetIds,
+        );
+      } catch (error) {
+        console.error(
+          "RECENT_GOVERNANCE_ACTIVITY_ENRICH_ERROR",
+          record.proposalId,
+          error,
+        );
+        return null;
+      }
+    },
+  );
 
-  const cancellationTargetState = buildCancellationTargetStateMap(enriched);
+  const proposals = enriched.filter(
+    (item): item is EnrichedProposal => item !== null,
+  );
+
+  const cancellationTargetState = buildCancellationTargetStateMap(proposals);
 
   const filtered =
     filter === "executed"
-      ? enriched.filter(
-          (item) =>
-            item.summary.status === "executed" ||
-            isExecutedCancellation(item.summary),
-        )
-      : enriched;
+      ? proposals.filter((item) => item.summary.status === "executed")
+      : proposals;
 
-  return filtered.map((item) => {
+  const sorted =
+    filter === "executed"
+      ? [...filtered].sort((a, b) => {
+          const aTime = a.raw.executedAt?.getTime() ?? 0;
+          const bTime = b.raw.executedAt?.getTime() ?? 0;
+          return bTime - aTime;
+        })
+      : filtered;
+
+  return sorted.map((item) => {
     const cancellationInfo = cancellationTargetState.get(item.summary.id);
 
     return {
       id: `proposal-${item.summary.id}-${item.summary.status}`,
-      type:
-        item.summary.kind === "cancel"
-          ? "proposal_created"
-          : "proposal_created",
+      type: "proposal_created",
       title: item.summary.title,
       description: cancellationInfo
         ? `Canceled by ${cancellationInfo.canceledByTitle}`
-        : item.summary.statusLabel,
-      occurredAt: item.summary.createdAt,
+        : "Executed onchain",
+      occurredAt: item.summary.executedAt ?? item.summary.createdAt,
       relatedProposalId: item.summary.id,
       relatedProposalCategory: item.summary.category,
       tone: cancellationInfo ? "danger" : item.summary.statusTone,
@@ -1077,23 +1149,26 @@ async function getRecentGovernanceActivityVotedForCurrentUser(): Promise<
     buildSharedGovernanceContext(),
     buildUserGovernanceContext(),
   ]);
-
-  const enriched: EnrichedProposal[] = [];
-
-  for (const record of records) {
-    try {
-      const proposal = await enrichProposal(record, sharedContext, userContext);
-      enriched.push(proposal);
-    } catch (error) {
-      console.error(
-        "RECENT_GOVERNANCE_ACTIVITY_VOTED_ENRICH_ERROR",
-        record.proposalId,
-        error,
-      );
-    }
-  }
+  const PROPOSAL_ENRICH_CONCURRENCY = 1;
+  const enriched = await mapWithConcurrency(
+    records,
+    PROPOSAL_ENRICH_CONCURRENCY,
+    async (record) => {
+      try {
+        return await enrichProposal(record, sharedContext, userContext);
+      } catch (error) {
+        console.error(
+          "RECENT_GOVERNANCE_ACTIVITY_VOTED_ENRICH_ERROR",
+          record.proposalId,
+          error,
+        );
+        return null;
+      }
+    },
+  );
 
   return enriched
+    .filter((item): item is EnrichedProposal => item !== null)
     .filter(isVisibleInPrimaryLists)
     .filter((item) => item.flags.hasVoted)
     .map((item) => ({
@@ -1107,7 +1182,7 @@ async function getRecentGovernanceActivityVotedForCurrentUser(): Promise<
       occurredAt: item.summary.createdAt,
       relatedProposalId: item.summary.id,
       relatedProposalCategory: item.summary.category,
-      tone: item.summary.kind === "cancel" ? "danger" : ("success" as const),
+      tone: item.summary.kind === "cancel" ? "danger" : "success",
     }));
 }
 
@@ -1123,16 +1198,16 @@ const getQueueableProposalsCached = unstable_cache(
   { revalidate: 15, tags: [GOVERNANCE_PROPOSALS_TAG] },
 );
 
-export async function getQueueableProposals(): Promise<ProposalSummary[]> {
-  return getQueueableProposalsCached();
-}
-
 const getRecentGovernanceActivityCached = unstable_cache(
   async (filter: "all" | "executed") =>
     getRecentGovernanceActivityUncached(filter),
   ["governance-recent-activity"],
   { revalidate: 15, tags: [GOVERNANCE_PROPOSALS_TAG] },
 );
+
+export async function getQueueableProposals(): Promise<ProposalSummary[]> {
+  return getQueueableProposalsCached();
+}
 
 export async function getExecutableProposals(): Promise<ProposalSummary[]> {
   return getExecutableProposalsCached();
@@ -1176,52 +1251,38 @@ export async function getProposalById(
   id: string,
 ): Promise<ProposalDetail | null> {
   const record = await db.proposalRecord.findUnique({
-    where: {
-      proposalId: id,
-    },
-    select: {
-      id: true,
-      proposalId: true,
-      title: true,
-      excerpt: true,
-      description: true,
-      descriptionHash: true,
-      category: true,
-      proposerLabel: true,
-      proposerAddress: true,
-      createdAt: true,
-      updatedAt: true,
-      votingStartsAt: true,
-      votingEndsAt: true,
-      queuedAt: true,
-      executableAt: true,
-      executedAt: true,
-      canceledAt: true,
-      defeatedAt: true,
-      governorTxHash: true,
-      governorAddress: true,
-      targets: true,
-      values: true,
-      calldatas: true,
-
-      proposalKind: true,
-      canceledProposalId: true,
-      canceledProposalTitle: true,
-      cancelHighlightUntil: true,
-      cancelHiddenAt: true,
-    },
+    where: { proposalId: id },
+    select: proposalRecordSelect,
   });
 
   if (!record) {
     return null;
   }
 
-  const [sharedContext, userContext] = await Promise.all([
+  const [sharedContext, userContext, records] = await Promise.all([
     buildSharedGovernanceContext(),
     buildUserGovernanceContext(),
+    getStoredProposalRecords(),
   ]);
 
-  const enriched = await enrichProposal(record, sharedContext, userContext);
+  const canceledTargetIds = new Set(
+    records
+      .filter(
+        (item) =>
+          item.proposalKind === "cancel" &&
+          typeof item.canceledProposalId === "string" &&
+          item.canceledProposalId.trim().length > 0 &&
+          (item.cancelHighlightUntil || item.cancelHiddenAt),
+      )
+      .map((item) => item.canceledProposalId!.trim()),
+  );
+
+  const enriched = await enrichProposal(
+    record,
+    sharedContext,
+    userContext,
+    canceledTargetIds,
+  );
 
   return {
     ...enriched.summary,

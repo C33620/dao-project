@@ -19,14 +19,14 @@ export async function GET(_request: Request, context: RouteContext) {
 
   if (!proposal || !payload) {
     return NextResponse.json(
-      { ok: false, error: "EXECUTION_PAYLOAD_NOT_FOUND" },
+      { ok: false, error: "QUEUE_PAYLOAD_NOT_FOUND" },
       { status: 404 },
     );
   }
 
-  if (!proposal.governance.canExecute) {
+  if (!proposal.governance.canQueue) {
     return NextResponse.json(
-      { ok: false, error: "PROPOSAL_NOT_EXECUTABLE" },
+      { ok: false, error: "PROPOSAL_NOT_QUEUEABLE" },
       { status: 409 },
     );
   }

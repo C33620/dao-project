@@ -51,6 +51,10 @@ export function ProposalVoteModal({
   const [isLoadingVoteFlow, setIsLoadingVoteFlow] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  function handleVoteSuccessAndClose(completedProposalId: string) {
+    onVoteSuccess(completedProposalId);
+    onClose();
+  }
 
   useEffect(() => {
     let isCancelled = false;
@@ -212,7 +216,7 @@ export function ProposalVoteModal({
           <VoteActionCard
             proposal={selectedProposal}
             initialActionState={selectedActionState}
-            onVoteSuccess={onVoteSuccess}
+            onVoteSuccess={handleVoteSuccessAndClose}
           />
         ) : null}
       </div>

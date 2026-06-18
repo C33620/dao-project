@@ -1,10 +1,10 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { ProposalCard } from "@/components/governance/proposal-card";
 import { getMagicWalletClient } from "@/lib/web3/magic-wallet-client";
 import type { ProposalSummary, VoteSupport } from "@/types/governance";
-import { useCallback, useState } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useState } from "react";
 import { createPublicClient, erc20Abi, http } from "viem";
 import { sepolia } from "viem/chains";
 
@@ -55,6 +55,10 @@ const MASTER_WALLET_ADDRESS = process.env.NEXT_PUBLIC_MASTER_WALLET_ADDRESS;
 const REBALANCE_GUARD_KEY = "governance-rebalance-guard";
 const REBALANCE_PENDING_KEY = "governance-rebalance-pending";
 
+function getScopedStorageKey(baseKey: string, walletAddress?: string) {
+  return walletAddress ? `${baseKey}:${walletAddress.toLowerCase()}` : baseKey;
+}
+
 const ProposalVoteModal = dynamic(
   () =>
     import("@/components/governance/proposal-vote-modal").then(
@@ -65,12 +69,15 @@ const ProposalVoteModal = dynamic(
   },
 );
 
-function readRebalanceGuard(): RebalanceGuard | null {
+function readRebalanceGuard(walletAddress?: string): RebalanceGuard | null {
   if (typeof window === "undefined") {
     return null;
   }
 
-  const raw = window.sessionStorage.getItem(REBALANCE_GUARD_KEY);
+  const raw = window.sessionStorage.getItem(
+    getScopedStorageKey(REBALANCE_GUARD_KEY, walletAddress),
+  );
+
   if (!raw) {
     return null;
   }
@@ -78,12 +85,14 @@ function readRebalanceGuard(): RebalanceGuard | null {
   try {
     return JSON.parse(raw) as RebalanceGuard;
   } catch {
-    window.sessionStorage.removeItem(REBALANCE_GUARD_KEY);
+    window.sessionStorage.removeItem(
+      getScopedStorageKey(REBALANCE_GUARD_KEY, walletAddress),
+    );
     return null;
   }
 }
 
-function writeRebalanceGuard(snapshotBlock: string) {
+function writeRebalanceGuard(snapshotBlock: string, walletAddress?: string) {
   if (typeof window === "undefined") {
     return;
   }
@@ -93,39 +102,120 @@ function writeRebalanceGuard(snapshotBlock: string) {
     snapshotBlock,
   };
 
-  window.sessionStorage.setItem(REBALANCE_GUARD_KEY, JSON.stringify(value));
+  window.sessionStorage.setItem(
+    getScopedStorageKey(REBALANCE_GUARD_KEY, walletAddress),
+    JSON.stringify(value),
+  );
 }
 
-function clearRebalanceGuard() {
+function clearRebalanceGuard(walletAddress?: string) {
   if (typeof window === "undefined") {
     return;
   }
 
-  window.sessionStorage.removeItem(REBALANCE_GUARD_KEY);
+  window.sessionStorage.removeItem(
+    getScopedStorageKey(REBALANCE_GUARD_KEY, walletAddress),
+  );
 }
 
-function markRebalancePending() {
+function markRebalancePending(walletAddress?: string) {
   if (typeof window === "undefined") {
     return;
   }
 
-  window.sessionStorage.setItem(REBALANCE_PENDING_KEY, "true");
+  window.sessionStorage.setItem(
+    getScopedStorageKey(REBALANCE_PENDING_KEY, walletAddress),
+    "true",
+  );
 }
 
-function hasPendingRebalance() {
+function hasPendingRebalance(walletAddress?: string) {
   if (typeof window === "undefined") {
     return false;
   }
 
-  return window.sessionStorage.getItem(REBALANCE_PENDING_KEY) === "true";
+  return (
+    window.sessionStorage.getItem(
+      getScopedStorageKey(REBALANCE_PENDING_KEY, walletAddress),
+    ) === "true"
+  );
 }
 
-function clearPendingRebalance() {
+function clearPendingRebalance(walletAddress?: string) {
   if (typeof window === "undefined") {
     return;
   }
 
-  window.sessionStorage.removeItem(REBALANCE_PENDING_KEY);
+  window.sessionStorage.removeItem(
+    getScopedStorageKey(REBALANCE_PENDING_KEY, walletAddress),
+  );
+}
+
+function getReadableWalletError(
+  error: unknown,
+  fallback = "We could not verify your governance balance.",
+): string {
+  if (typeof error !== "object" || error === null) {
+    return fallback;
+  }
+
+  const maybeError = error as {
+    code?: number | string;
+    shortMessage?: string;
+    message?: string;
+    details?: string;
+    cause?: unknown;
+  };
+
+  const causeMessage =
+    typeof maybeError.cause === "object" &&
+    maybeError.cause !== null &&
+    "message" in maybeError.cause &&
+    typeof (maybeError.cause as { message?: unknown }).message === "string"
+      ? (maybeError.cause as { message: string }).message
+      : "";
+
+  const rawText = [
+    maybeError.shortMessage,
+    maybeError.message,
+    maybeError.details,
+    causeMessage,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" | ")
+    .toLowerCase();
+
+  if (
+    maybeError.code === 4001 ||
+    maybeError.code === "ACTION_REJECTED" ||
+    rawText.includes("user rejected") ||
+    rawText.includes("user canceled") ||
+    rawText.includes("user cancelled") ||
+    rawText.includes("action rejected")
+  ) {
+    return "Action canceled in wallet.";
+  }
+
+  if (
+    rawText.includes("insufficient funds") ||
+    rawText.includes("insufficient balance")
+  ) {
+    return "Your wallet does not have enough funds to complete this action.";
+  }
+
+  if (
+    rawText.includes("wrong network") ||
+    rawText.includes("chain mismatch") ||
+    rawText.includes("wallet_switchethereumchain")
+  ) {
+    return "Please switch your wallet to Sepolia and try again.";
+  }
+
+  if (maybeError.shortMessage && maybeError.shortMessage.trim().length > 0) {
+    return maybeError.shortMessage;
+  }
+
+  return fallback;
 }
 
 export function ProposalList({
@@ -147,6 +237,18 @@ export function ProposalList({
       type: null,
       message: "",
     });
+
+  useEffect(() => {
+    if (!governanceFeedback.type || !governanceFeedback.message) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setGovernanceFeedback({ type: null, message: "" });
+    }, 2000);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [governanceFeedback]);
 
   const runGovernancePrecheck = useCallback(async () => {
     const publicClient = createPublicClient({
@@ -202,12 +304,12 @@ export function ProposalList({
       });
 
       await publicClient.waitForTransactionReceipt({ hash });
-      markRebalancePending();
+      markRebalancePending(walletAddress);
 
       setGovernanceFeedback({
         type: "success",
         message:
-          "Excess governance tokens were returned to the treasury. Your account is now rebalanced, but you must wait for the next proposal snapshot before voting.",
+          "Your account is now rebalanced, but you must wait for the next proposal snapshot before voting.",
       });
 
       return { allowed: false as const };
@@ -237,8 +339,8 @@ export function ProposalList({
       setGovernanceFeedback({
         type: "info",
         message: deficitData.queued
-          ? "Your account is below the governance balance target. An admin funding item has been queued. You can vote after the top-up is completed and the next snapshot is reached."
-          : "Your account is below the governance balance target. Please wait for admin funding before voting.",
+          ? "A governance top-up has been queued. You can vote after funding completes and a new snapshot is reached."
+          : "Your governance balance is below target. Please wait for funding before voting.",
       });
 
       return { allowed: false as const };
@@ -258,12 +360,14 @@ export function ProposalList({
           return;
         }
       } catch (error) {
+        const message = getReadableWalletError(
+          error,
+          "We could not verify your governance balance.",
+        );
+
         setGovernanceFeedback({
-          type: "error",
-          message:
-            error instanceof Error
-              ? error.message
-              : "We could not verify your governance balance.",
+          type: message === "Action canceled in wallet." ? "info" : "error",
+          message,
         });
         return;
       }

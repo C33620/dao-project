@@ -6,6 +6,7 @@ import { getMagicClient } from "@/lib/auth/magic-client";
 import {
   GOVERNANCE_TOKEN_ADDRESS,
   MY_GOVERNOR_ADDRESS,
+  SEPOLIA_CHAIN_ID,
 } from "@/lib/web3/contracts";
 import type {
   ProposalActionState,
@@ -40,14 +41,92 @@ function toGovernorSupport(support: VoteSupport): number {
   }
 }
 
-async function revalidateGovernanceCache(): Promise<void> {
-  const response = await fetch("/api/revalidate-governance", {
-    method: "POST",
-    cache: "no-store",
-  });
+function getErrorCode(error: unknown): number | string | undefined {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (typeof (error as { code?: unknown }).code === "number" ||
+      typeof (error as { code?: unknown }).code === "string")
+  ) {
+    return (error as { code: number | string }).code;
+  }
 
-  if (!response.ok) {
-    throw new Error("Failed to revalidate governance cache.");
+  return undefined;
+}
+
+function getReadableWalletError(error: unknown, fallback: string): string {
+  const code = getErrorCode(error);
+
+  if (code === 4001 || code === "ACTION_REJECTED") {
+    return "You canceled the wallet request.";
+  }
+
+  if (code === 4902) {
+    return "Sepolia is not available in this wallet.";
+  }
+
+  if (typeof error === "object" && error !== null) {
+    if ("shortMessage" in error && typeof error.shortMessage === "string") {
+      return error.shortMessage;
+    }
+
+    if ("reason" in error && typeof error.reason === "string") {
+      return error.reason;
+    }
+
+    if ("message" in error && typeof error.message === "string") {
+      return error.message;
+    }
+  }
+
+  return fallback;
+}
+
+async function revalidateGovernanceCache(): Promise<void> {
+  try {
+    await fetch("/api/revalidate-governance", {
+      method: "POST",
+      cache: "no-store",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+  } catch {
+    // Ignore revalidation failures in the client.
+    // The onchain transaction result is more important than cache refresh.
+  }
+}
+
+async function getBrowserProvider() {
+  const magic = getMagicClient();
+  return new BrowserProvider(magic.rpcProvider);
+}
+
+async function ensureSepoliaNetwork(provider: BrowserProvider): Promise<void> {
+  const network = await provider.getNetwork();
+
+  if (Number(network.chainId) === SEPOLIA_CHAIN_ID) {
+    return;
+  }
+
+  try {
+    await provider.send("wallet_switchEthereumChain", [
+      { chainId: `0x${SEPOLIA_CHAIN_ID.toString(16)}` },
+    ]);
+  } catch (error) {
+    throw new Error(
+      getReadableWalletError(
+        error,
+        "Please switch your wallet to Sepolia before continuing.",
+      ),
+    );
+  }
+
+  const refreshedNetwork = await provider.getNetwork();
+
+  if (Number(refreshedNetwork.chainId) !== SEPOLIA_CHAIN_ID) {
+    throw new Error("Wallet is not connected to Sepolia.");
   }
 }
 
@@ -55,10 +134,10 @@ async function submitVoteOnchain(
   proposalId: string,
   support: VoteSupport,
 ): Promise<string> {
-  const magic = getMagicClient();
-  const provider = new BrowserProvider(magic.rpcProvider);
-  const signer = await provider.getSigner();
+  const provider = await getBrowserProvider();
+  await ensureSepoliaNetwork(provider);
 
+  const signer = await provider.getSigner();
   const governorContract = new Contract(
     MY_GOVERNOR_ADDRESS,
     myGovernorAbi,
@@ -78,18 +157,22 @@ async function submitVoteOnchain(
 }
 
 async function waitForVoteReceipt(txHash: string): Promise<void> {
-  const magic = getMagicClient();
-  const provider = new BrowserProvider(magic.rpcProvider);
+  const provider = await getBrowserProvider();
   const receipt = await provider.waitForTransaction(txHash);
 
   if (!receipt) {
     throw new Error("Vote transaction receipt not found.");
   }
+
+  if (receipt.status !== 1) {
+    throw new Error("Vote transaction failed onchain.");
+  }
 }
 
 async function enableVotingPowerOnchain(): Promise<string> {
-  const magic = getMagicClient();
-  const provider = new BrowserProvider(magic.rpcProvider);
+  const provider = await getBrowserProvider();
+  await ensureSepoliaNetwork(provider);
+
   const signer = await provider.getSigner();
   const signerAddress = await signer.getAddress();
 
@@ -109,12 +192,15 @@ async function enableVotingPowerOnchain(): Promise<string> {
 }
 
 async function waitForDelegationReceipt(txHash: string): Promise<void> {
-  const magic = getMagicClient();
-  const provider = new BrowserProvider(magic.rpcProvider);
+  const provider = await getBrowserProvider();
   const receipt = await provider.waitForTransaction(txHash);
 
   if (!receipt) {
     throw new Error("Delegation transaction receipt not found.");
+  }
+
+  if (receipt.status !== 1) {
+    throw new Error("Delegation transaction failed onchain.");
   }
 }
 
@@ -181,7 +267,9 @@ export function VoteActionCard({
       ? "Abstain"
       : null;
 
-  const needsDelegation = actionState.eligibility.reason === "delegated_away";
+  const needsDelegation =
+    actionState.eligibility.reason === "delegated_away" ||
+    actionState.eligibility.reason === "no_voting_power";
 
   const hasAlreadyVoted =
     actionState.eligibility.reason === "already_voted" ||
@@ -199,10 +287,10 @@ export function VoteActionCard({
   const buttonLabel = isBusy
     ? needsDelegation
       ? txPhase === "awaiting_wallet"
-        ? "Confirm vote submission..."
+        ? "Confirm delegation..."
         : "Enabling vote..."
       : txPhase === "awaiting_wallet"
-      ? "Confirm vote submission..."
+      ? "Confirm vote..."
       : "Submitting vote..."
     : hasAlreadyVoted
     ? "Voted"
@@ -236,8 +324,11 @@ export function VoteActionCard({
   }, [proposal.status, votingEndsDate]);
 
   async function handleEnableVote() {
-    setTxPhase("awaiting_wallet");
+    if (isBusy) {
+      return;
+    }
 
+    setTxPhase("awaiting_wallet");
     setActionState((current) => ({
       ...current,
       vote: {
@@ -273,7 +364,7 @@ export function VoteActionCard({
           canVote: true,
           title: "Voting enabled",
           description:
-            "Your voting power has been enabled. You can now submit your vote.",
+            "Your self-delegation was confirmed. You can now submit your vote.",
         },
         vote: {
           ...current.vote,
@@ -281,18 +372,13 @@ export function VoteActionCard({
           submitLabel: "Submit vote",
           feedbackTitle: "Voting enabled",
           feedbackMessage:
-            "Your self-delegation was confirmed. Review your vote and submit.",
+            "Your voting power is active. Review your choice and submit.",
         },
       }));
 
       setTxPhase("idle");
       router.refresh();
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "We could not enable voting power.";
-
       setTxPhase("error");
       setActionState((current) => ({
         ...current,
@@ -301,13 +387,20 @@ export function VoteActionCard({
           status: "error",
           submitLabel: "Enable vote",
           feedbackTitle: "Enable vote failed",
-          feedbackMessage: message,
+          feedbackMessage: getReadableWalletError(
+            error,
+            "We could not enable voting power.",
+          ),
         },
       }));
     }
   }
 
   async function handleSubmitVote() {
+    if (isBusy) {
+      return;
+    }
+
     if (!selectedSupport) {
       setActionState((current) => ({
         ...current,
@@ -322,7 +415,6 @@ export function VoteActionCard({
     }
 
     setTxPhase("awaiting_wallet");
-
     setActionState((current) => ({
       ...current,
       vote: {
@@ -331,7 +423,7 @@ export function VoteActionCard({
         selectedSupport,
         submitLabel: "Submitting vote...",
         feedbackTitle: "Action needed",
-        feedbackMessage: "Confirm your vote to continue.",
+        feedbackMessage: "Confirm your vote in the wallet to continue.",
       },
     }));
 
@@ -374,16 +466,11 @@ export function VoteActionCard({
         },
       }));
 
-      await revalidateGovernanceCache();
-      router.refresh();
-      setTxPhase("idle");
+      setTxPhase("success");
       onVoteSuccess?.(proposal.id);
+      void revalidateGovernanceCache();
+      router.refresh();
     } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "We could not submit your vote.";
-
       setTxPhase("error");
       setActionState((current) => ({
         ...current,
@@ -393,7 +480,10 @@ export function VoteActionCard({
           selectedSupport,
           submitLabel: "Try again",
           feedbackTitle: "Vote failed",
-          feedbackMessage: message,
+          feedbackMessage: getReadableWalletError(
+            error,
+            "We could not submit your vote.",
+          ),
         },
       }));
     }
