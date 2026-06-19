@@ -881,16 +881,15 @@ export default function CreateProposalClient({
 
       await finalizeProposalSubmission(submissionId, proposalId.toString());
 
-      await fetch("/api/revalidate-governance", {
-        method: "POST",
-      });
-
       safeSetIsReviewOpen(false);
       safeSetSubmissionStage("idle");
 
       const destination = `${returnHref}?created=${proposalId.toString()}`;
       router.replace(destination);
-      router.refresh();
+
+      setTimeout(() => {
+        router.refresh();
+      }, 0);
     } catch (error) {
       console.error("GOVERNOR_PROPOSAL_SUBMISSION_ERROR", error);
 

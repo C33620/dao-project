@@ -9,6 +9,22 @@ export type AppSession = {
   displayName: string;
 };
 
+const isProd = process.env.NODE_ENV === "production";
+
+function logSessionDebug(label: string, payload?: unknown) {
+  if (!isProd) {
+    console.log(`[SESSION_SERVICE] ${label}`, payload ?? "");
+  }
+}
+
+function logSessionError(label: string, error: unknown) {
+  if (!isProd) {
+    console.error(`[SESSION_SERVICE] ${label}`, error);
+  } else {
+    console.error(`[SESSION_SERVICE] ${label}`);
+  }
+}
+
 function getSessionSecret() {
   const secret = process.env.AUTH_SESSION_SECRET;
 
@@ -23,7 +39,7 @@ export async function getSession(): Promise<AppSession | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
 
-  console.log("[SESSION_SERVICE] COOKIE_PRESENT", Boolean(token));
+  logSessionDebug("COOKIE_PRESENT", Boolean(token));
 
   if (!token) {
     return null;
@@ -39,14 +55,14 @@ export async function getSession(): Promise<AppSession | null> {
     const displayName =
       typeof payload.displayName === "string" ? payload.displayName : null;
 
-    console.log("[SESSION_SERVICE] SESSION_PAYLOAD", {
+    logSessionDebug("SESSION_PAYLOAD", {
       issuer,
       email,
       displayName,
     });
 
     if (!issuer || !email || !displayName) {
-      console.log("[SESSION_SERVICE] SESSION_INVALID_SHAPE");
+      logSessionDebug("SESSION_INVALID_SHAPE");
       return null;
     }
 
@@ -56,7 +72,7 @@ export async function getSession(): Promise<AppSession | null> {
       displayName,
     };
   } catch (error) {
-    console.error("[SESSION_SERVICE] SESSION_VERIFY_FAILED", error);
+    logSessionError("SESSION_VERIFY_FAILED", error);
     return null;
   }
 }

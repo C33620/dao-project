@@ -1,5 +1,5 @@
 import governorAbi from "@/abi/MyGovernor.json";
-import { revalidateTag } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { decodeEventLog, type Hex } from "viem";
 
@@ -206,6 +206,7 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     });
 
     revalidateTag(GOVERNANCE_PROPOSALS_TAG, "max");
+    revalidatePath("/app/proposals");
 
     return NextResponse.json({
       data: {

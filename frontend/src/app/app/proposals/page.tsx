@@ -10,7 +10,7 @@ import { ProposalsListSkeleton } from "./proposals-list-skeleton";
 export default function ProposalsPage() {
   return (
     <PageShell title="" description="">
-      <ProposalsAutoRefresh intervalMs={15000} />
+      <ProposalsAutoRefresh />
 
       <div className="page-shell__content">
         <SectionCard

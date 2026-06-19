@@ -1241,6 +1241,281 @@ export async function getDashboardSummary(): Promise<DashboardSummary> {
   };
 }
 
+const GOVERNANCE_CACHE_REVALIDATE_SECONDS = 60;
+
+type SharedProposalSummaryBase = {
+  summary: ProposalSummary;
+  governorState: GovernorState;
+  snapshotBlock: string | null;
+};
+
+async function enrichProposalShared(
+  record: StoredProposalRecord,
+  sharedContext: SharedGovernanceContext,
+  canceledTargetIds: ReadonlySet<string> = new Set(),
+): Promise<SharedProposalSummaryBase> {
+  const client = getBlockchainClient();
+  const proposalId = BigInt(record.proposalId);
+
+  const [rawState, snapshot, deadline] = await withRpcRetry(async () => {
+    return client.multicall({
+      contracts: [
+        {
+          address: MY_GOVERNOR_ADDRESS,
+          abi: governorAbi,
+          functionName: "state",
+          args: [proposalId],
+        },
+        {
+          address: MY_GOVERNOR_ADDRESS,
+          abi: governorAbi,
+          functionName: "proposalSnapshot",
+          args: [proposalId],
+        },
+        {
+          address: MY_GOVERNOR_ADDRESS,
+          abi: governorAbi,
+          functionName: "proposalDeadline",
+          args: [proposalId],
+        },
+      ] as const,
+      allowFailure: false,
+    });
+  });
+
+  const governorState = mapGovernorState(Number(rawState));
+  const status = governorStateToProposalStatus(governorState);
+  const statusView = mapStatus(status);
+
+  const votingStartsAt = record.votingStartsAt
+    ? formatReadableDate(record.votingStartsAt)
+    : formatTimepointFromClockMode(
+        snapshot,
+        sharedContext.clockMode,
+        sharedContext.currentBlockNumber,
+        sharedContext.currentBlockTimestampSeconds,
+      );
+
+  const votingEndsAt = record.votingEndsAt
+    ? formatReadableDate(record.votingEndsAt)
+    : formatTimepointFromClockMode(
+        deadline,
+        sharedContext.clockMode,
+        sharedContext.currentBlockNumber,
+        sharedContext.currentBlockTimestampSeconds,
+      );
+
+  const proposalKind: ProposalKind =
+    record.proposalKind === "cancel" ? "cancel" : "standard";
+
+  const isCanceledTarget = canceledTargetIds.has(record.proposalId);
+
+  const summary: ProposalSummary = {
+    id: record.proposalId,
+    slug: record.proposalId,
+    title: record.title,
+    excerpt: record.excerpt,
+    status,
+    statusLabel: statusView.statusLabel,
+    statusTone: statusView.statusTone,
+    category: record.category,
+    proposer: record.proposerLabel || record.proposerAddress,
+    createdAt: formatReadableDate(record.createdAt),
+    votingStartsAt,
+    votingEndsAt,
+    queuedAt: record.queuedAt ? formatReadableDate(record.queuedAt) : undefined,
+    executableAt: record.executableAt
+      ? formatReadableDate(record.executableAt)
+      : undefined,
+    executedAt: record.executedAt
+      ? formatReadableDate(record.executedAt)
+      : undefined,
+    actionsLabel:
+      governorState === "pending"
+        ? "Actions will appear once voting is active."
+        : statusView.statusLabel,
+    hasVoted: false,
+    kind: proposalKind,
+    canceledProposalId: record.canceledProposalId ?? undefined,
+    canceledProposalTitle: record.canceledProposalTitle ?? undefined,
+    cancelHighlightUntil: record.cancelHighlightUntil
+      ? formatReadableDate(record.cancelHighlightUntil)
+      : undefined,
+    cancelVisibilityState: record.cancelHiddenAt ? "hidden" : "visible",
+    isCanceled: isCanceledTarget,
+  };
+
+  return {
+    summary,
+    governorState,
+    snapshotBlock: snapshot > BigInt(0) ? snapshot.toString() : null,
+  };
+}
+
+const getOpenProposalsSharedCached = unstable_cache(
+  async (): Promise<SharedProposalSummaryBase[]> => {
+    const records = await getStoredProposalRecords();
+    const sharedContext = await buildSharedGovernanceContext();
+
+    const canceledTargetIds = new Set(
+      records
+        .filter(
+          (record) =>
+            record.proposalKind === "cancel" &&
+            typeof record.canceledProposalId === "string" &&
+            record.canceledProposalId.trim().length > 0 &&
+            (record.cancelHighlightUntil || record.cancelHiddenAt),
+        )
+        .map((record) => record.canceledProposalId!.trim()),
+    );
+
+    const visibleOpenRecords = records.filter(
+      (record) =>
+        !record.cancelHiddenAt &&
+        (record.proposalKind === "cancel" ||
+          record.proposalKind === "standard"),
+    );
+
+    const enriched = await mapWithConcurrency(
+      visibleOpenRecords,
+      1,
+      async (record) => {
+        try {
+          return await enrichProposalShared(
+            record,
+            sharedContext,
+            canceledTargetIds,
+          );
+        } catch (error) {
+          console.error(
+            "GET_OPEN_PROPOSALS_SHARED_ENRICH_ERROR",
+            record.proposalId,
+            error,
+          );
+          return null;
+        }
+      },
+    );
+
+    return enriched
+      .filter(
+        (proposal): proposal is SharedProposalSummaryBase => proposal !== null,
+      )
+
+      .filter(
+        (proposal) =>
+          proposal.summary.status === "active" ||
+          proposal.summary.status === "pending",
+      );
+  },
+  ["governance-open-proposals-shared"],
+  {
+    revalidate: GOVERNANCE_CACHE_REVALIDATE_SECONDS,
+    tags: [GOVERNANCE_PROPOSALS_TAG],
+  },
+);
+
+async function attachUserStateToProposalSummaries(
+  proposals: SharedProposalSummaryBase[],
+): Promise<ProposalSummary[]> {
+  const userContext = await buildUserGovernanceContext();
+
+  if (!userContext.voterContext) {
+    return proposals.map(({ summary, governorState }) => ({
+      ...summary,
+      actionsLabel:
+        governorState === "pending"
+          ? "Actions will appear once voting is active."
+          : governorState === "active"
+          ? "Not eligible to vote on this proposal."
+          : summary.actionsLabel,
+      hasVoted: false,
+    }));
+  }
+
+  const client = getBlockchainClient();
+  const { voter, delegatee, currentVotes, balance, tokenClock } =
+    userContext.voterContext;
+
+  const results = await mapWithConcurrency(proposals, 1, async (proposal) => {
+    let hasVoted = false;
+    let snapshotVotes = BigInt(0);
+
+    try {
+      hasVoted = await withRpcRetry(() =>
+        client.readContract({
+          address: MY_GOVERNOR_ADDRESS,
+          abi: governorAbi,
+          functionName: "hasVoted",
+          args: [BigInt(proposal.summary.id), voter],
+        }),
+      );
+    } catch (error) {
+      console.error(
+        "OPEN_PROPOSALS_HAS_VOTED_ERROR",
+        proposal.summary.id,
+        error,
+      );
+    }
+
+    const snapshot = proposal.snapshotBlock
+      ? BigInt(proposal.snapshotBlock)
+      : null;
+
+    if (snapshot !== null && snapshot < tokenClock) {
+      try {
+        snapshotVotes = await withRpcRetry(() =>
+          client.readContract({
+            address: GOVERNANCE_TOKEN_ADDRESS,
+            abi: governanceTokenAbi,
+            functionName: "getPastVotes",
+            args: [voter, snapshot],
+          }),
+        );
+      } catch (error) {
+        console.error(
+          "OPEN_PROPOSALS_GET_PAST_VOTES_ERROR",
+          proposal.summary.id,
+          error,
+        );
+      }
+    }
+
+    const needsDelegation =
+      balance > BigInt(0) &&
+      (delegatee.toLowerCase() !== voter.toLowerCase() ||
+        currentVotes === BigInt(0));
+
+    const canVote =
+      proposal.summary.status === "active" &&
+      !hasVoted &&
+      snapshotVotes > BigInt(0);
+
+    const actionsLabel = hasVoted
+      ? "Vote recorded"
+      : canVote
+      ? "Vote available"
+      : proposal.summary.status !== "active"
+      ? "Actions will appear once voting is active."
+      : needsDelegation
+      ? "Enable vote to participate."
+      : "Not eligible to vote on this proposal.";
+
+    return {
+      ...proposal.summary,
+      hasVoted,
+      actionsLabel,
+    };
+  });
+
+  return results;
+}
+
+export async function getOpenProposals(): Promise<ProposalSummary[]> {
+  const shared = await getOpenProposalsSharedCached();
+  return attachUserStateToProposalSummaries(shared);
+}
+
 export async function getProposals(
   filter: ProposalFilterOption = "all",
 ): Promise<ProposalSummary[]> {

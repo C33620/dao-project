@@ -1,39 +1,43 @@
 "use client";
 
+"use client";
+
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
-type ProposalsAutoRefreshProps = {
-  intervalMs?: number;
-};
-
-export function ProposalsAutoRefresh({
-  intervalMs = 15000,
-}: ProposalsAutoRefreshProps) {
+export function ProposalsAutoRefresh() {
   const router = useRouter();
+  const hasMountedRef = useRef(false);
 
   useEffect(() => {
-    const refreshIfVisible = () => {
-      if (document.visibilityState === "visible") {
-        router.refresh();
-      }
-    };
-
-    const intervalId = window.setInterval(refreshIfVisible, intervalMs);
-
     const handleVisibilityChange = () => {
+      if (!hasMountedRef.current) {
+        return;
+      }
+
       if (document.visibilityState === "visible") {
         router.refresh();
       }
     };
+
+    const handleWindowFocus = () => {
+      if (!hasMountedRef.current) {
+        return;
+      }
+
+      router.refresh();
+    };
+
+    hasMountedRef.current = true;
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
 
     return () => {
-      window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
     };
-  }, [intervalMs, router]);
+  }, [router]);
 
   return null;
 }
