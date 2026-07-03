@@ -21,7 +21,6 @@ Built with **Hardhat 3**, **Solidity**, and **OpenZeppelin Governor**, the proje
 
 ## Table of Contents
 
-- [✨ Vision](#vision)
 - [🧭 Overview](#overview)
 - [🧱 Architecture](#architecture)
 - [📦 Repository Structure](#repository-structure)
@@ -34,11 +33,7 @@ Built with **Hardhat 3**, **Solidity**, and **OpenZeppelin Governor**, the proje
 - [🚀 Getting Started](#getting-started)
 - [🧪 Sepolia Validation Checklist](#sepolia-validation-checklist)
 
-***
-<a id="vision"></a>
-## ✨ Vision
 
-KyotoTechMeetup DAO is a governance-focused project exploring how a community can coordinate decisions through transparent, on-chain mechanisms. The goal is to build a clean and credible base for DAO-style coordination, where execution is driven by proposals, voting power, and timelock-controlled actions rather than trust in an admin wallet.
 
 ***
 
