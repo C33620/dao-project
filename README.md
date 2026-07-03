@@ -1,8 +1,8 @@
 # 🏛️ KyotoTechMeetup DAO
 
-<div align="center">
+<div align="left">
 
-# 🏛️ KyotoTechMeetup DAO
+
 
 KyotoTechMeetup DAO is an on-chain governance platform designed to help a community capture, discuss, and execute ideas that contribute to its growth.
 
