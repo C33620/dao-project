@@ -225,10 +225,23 @@ Coverage is used here as a confidence signal for core production contracts.
 - npm
 - Git
 
+ > [!WARNING]
+> Before installing dependencies, configure npm to ignore packages published within the last **7 days**. This helps reduce the risk of installing newly published malicious packages as part of a supply-chain attack.
+>
+> ```bash
+> npm config set min-release-age 7
+> ```
+
 ### Install dependencies
 
 ```bash
 npm install
+```
+
+### Start the development environment
+
+```bash
+npm run dev
 ```
 
 ### Compile
