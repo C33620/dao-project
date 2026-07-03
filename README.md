@@ -21,9 +21,8 @@ Built with **Hardhat 3**, **Solidity**, and **OpenZeppelin Governor**, the proje
 
 ## Table of Contents
 
-- [🧭 Overview](#overview)
+- [✨ Key Features](#key-features)
 - [🧱 Architecture](#architecture)
-- [📦 Repository Structure](#repository-structure)
 - [🔗 Deployed Contracts](#deployed-contracts)
 - [⚙️ Deployment Model](#deployment-model)
 - [🪙 Token Distribution](#token-distribution)
@@ -33,30 +32,67 @@ Built with **Hardhat 3**, **Solidity**, and **OpenZeppelin Governor**, the proje
 - [🚀 Getting Started](#getting-started)
 - [🧪 Sepolia Validation Checklist](#sepolia-validation-checklist)
 
+ *** 
 
+<a id="key-features"></a>
+## ✨ Key Features
+
+### 🧑‍🤝‍🧑 Seamless User Onboarding (Magic Link Auth)
+
+- Users join the platform using a **magic link login flow**
+- No wallets or seed phrases required at signup
+- Each user is automatically assigned a **magic wallet** after onboarding
+
+### 🏛️ Hybrid Governance System (Admin + DAO)
+
+- A single **admin account manages initial onboarding**
+- Admin is the only entity with access to the admin panel
+- Every new user triggers a notification in the admin panel requesting token allocation
+
+### 🪙 Equal Token Distribution Model
+
+- All users receive an **equal number of governance tokens**
+- Token allocation is controlled through the admin onboarding flow
+- Designed to ensure **fair voting power distribution across the community**
+
+### ⚖️ Anti-Abuse Token Rebalancing System
+
+- Automated logic checks user token balances regularly
+- If a user receives too many tokens:
+  - surplus tokens are automatically returned to the master wallet
+- If a user has too few tokens:
+  - admin is notified to top up the allocation
+- Ensures **consistent fairness across all participants**
+
+### 🗳️ Snapshot-Based Voting System
+
+- Voting power is determined using periodic **snapshots**
+- After token rebalancing, users must wait for the next snapshot before voting
+- Prevents manipulation of voting power during governance cycles
+
+### 📬 Admin Notification System
+
+- Admin receives real-time messages when:
+  - a new user signs up
+  - token allocation is required
+  - imbalance is detected in token distribution
+
+### 🌐 Full-Stack Governance Application
+
+- Frontend built with **Next.js**
+- Backend powered by **MongoDB**
+- Smart contracts handle governance execution
+- Application bridges Web2 onboarding with Web3 governance
+
+### 🧠 Core Design Philosophy
+
+- Every community member has equal voting power
+- Governance remains transparent and auditable on-chain
+- Admin role exists only for onboarding, not decision-making
+- System actively prevents token imbalance or abuse
 
 ***
 
-<a id="overview"></a>
-## 🧭 Overview
-
-This project implements a standard governance lifecycle around a governed execution target and an on-chain proposal registry.
-
-### Governance flow
-
-1. Delegate voting power.
-2. Create a proposal.
-3. Vote during the voting period.
-4. Queue a successful proposal in the timelock.
-5. Execute it after the timelock delay.
-6. Update target contract state on-chain.
-
-Two governance flows are used to validate the system:
-
-- `Box` proves that governance can execute a state-changing action end to end.
-- `ProposalRegistry` proves that executed proposals can also be recorded as readable governance history on-chain.
-
-***
 <a id="architecture"></a>
 ## 🧱 Architecture
 
@@ -72,35 +108,7 @@ The system is split into focused contracts so each governance responsibility rem
 | `MockVotesToken.sol` | Testing helper contract used only in the test suite. |
 
 ***
-<a id="repository-structure"></a>
-## 📦 Repository Structure
 
-```text
-contracts/
-  Box.sol
-  GovernanceToken.sol
-  MockVotesToken.sol
-  MyGovernor.sol
-  ProposalRegistry.sol
-  Timelock.sol
-scripts/
-  deploy.ts
-  runLifecycle.ts
-  run-box-flow.ts
-  run-registry-flow.ts
-test/
-  GovernanceFlow.ts
-  GovernanceToken.ts
-  Governor.defensive.ts
-  Governor.lifecycle.ts
-  ProposalRegistry.ts
-deployments/
-hardhat.config.ts
-```
-
-The deployment flow is driven by `deploy.ts`, which acts as the source of truth for the Sepolia deployment process.
-
-***
 <a id="deployed-contracts"></a>
 ## 🔗 Deployed Contracts
 
@@ -157,7 +165,7 @@ The project validates governance through real multi-step flows on Sepolia rather
 
 The Box flow proves that a proposal can successfully modify governed contract state on-chain.
 
-1. Propose a call to `Box.store(77)`.
+1. Propose a call to `Box.store()`.
 2. Wait for the proposal to move from `Pending` to `Active`.
 3. Vote using delegated wallets.
 4. Wait until the proposal reaches `Succeeded`.
