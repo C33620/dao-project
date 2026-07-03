@@ -18,7 +18,6 @@ Built with **Hardhat 3**, **Solidity**, and **OpenZeppelin Governor**, the proje
 
 ***
 
-## Table of Contents
 
 ## Table of Contents
 
