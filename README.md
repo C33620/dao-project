@@ -2,7 +2,16 @@
 
 <div align="center">
 
-An on-chain governance DAO built with **Hardhat 3**, **Solidity**, and **OpenZeppelin Governor**. Token holders can delegate voting power, submit proposals, vote on governance decisions, queue approved actions through a timelock, and execute them on-chain through a structured governance lifecycle.
+# 🏛️ KyotoTechMeetup DAO
+
+KyotoTechMeetup DAO is an on-chain governance platform designed to help a community capture, discuss, and execute ideas that contribute to its growth.
+
+Community meetups often generate valuable suggestions during conversations, but many of those ideas disappear once the event ends. This project provides a transparent governance system where members can transform ideas into proposals, vote on them using delegated voting power, and execute approved decisions entirely on-chain through a secure timelock-controlled governance process.
+
+Rather than relying on a single organizer or administrator, KyotoTechMeetup DAO gives every participating member a voice in shaping the community. It serves as a foundation for collaborative decision-making, where proposals become part of a permanent on-chain history and successful initiatives can be executed transparently for the benefit of the entire group.
+
+Built with **Hardhat 3**, **Solidity**, and **OpenZeppelin Governor**, the project demonstrates a complete governance lifecycle including proposal creation, voting, timelock queuing, and on-chain execution.
+
 
 
 </div>
