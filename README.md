@@ -1,103 +1,124 @@
 # 🏛️ KyotoTechMeetup DAO
 
-<div align="center">
+<div align="left">
 
-An on-chain governance DAO built with **Hardhat 3**, **Solidity**, and **OpenZeppelin Governor**. Token holders can delegate voting power, submit proposals, vote on governance decisions, queue approved actions through a timelock, and execute them on-chain through a structured governance lifecycle.
+
+
+KyotoTechMeetup DAO is an on-chain governance platform designed to help a community capture, discuss, and execute ideas that contribute to its growth.
+
+Community meetups often generate valuable suggestions during conversations, but many of those ideas disappear once the event ends. This project provides a transparent governance system where members can transform ideas into proposals, vote on them using delegated voting power, and execute approved decisions entirely on-chain through a secure timelock-controlled governance process.
+
+Rather than relying on a single organizer or administrator, KyotoTechMeetup DAO gives every participating member a voice in shaping the community. It serves as a foundation for collaborative decision-making, where proposals become part of a permanent on-chain history and successful initiatives can be executed transparently for the benefit of the entire group.
+
+Built with **Hardhat 3**, **Solidity**, and **OpenZeppelin Governor**, the project demonstrates a complete governance lifecycle including proposal creation, voting, timelock queuing, and on-chain execution.
+
 
 
 </div>
 
 ***
 
-## Table of Contents
 
 ## Table of Contents
 
-- [✨ Vision](#vision)
-- [🧭 Overview](#overview)
+- [✨ Key Features](#key-features)
 - [🧱 Architecture](#architecture)
-- [📦 Repository Structure](#repository-structure)
 - [🔗 Deployed Contracts](#deployed-contracts)
 - [⚙️ Deployment Model](#deployment-model)
-- [🪙 Token Distribution](#token-distribution)
+- [🪙 Deployment Token Setup](#token-deployment-setup)
+- [👥 User Token Distribution](#user-token-distribution)
 - [🗳️ Governance Lifecycle](#governance-lifecycle)
-- [🛡️ Security Review Status](#security-review-status)
+- [🛡️ Fairness & Safety Mechanisms](#fairness-safety-mechanisms)
 - [📊 Coverage](#coverage)
 - [🚀 Getting Started](#getting-started)
-- [🧪 Sepolia Validation Checklist](#sepolia-validation-checklist)
+
+
+ *** 
+
+<a id="key-features"></a>
+## ✨ Key Features
+
+### 🧑‍🤝‍🧑 Seamless User Onboarding (Magic Link Auth)
+
+- Users join the platform using a **magic link login flow**
+- No wallets or seed phrases required at signup
+- Each user is automatically assigned a **magic wallet** after onboarding
+
+### 🏛️ Hybrid Governance System (Admin + DAO)
+
+- A single **admin account manages initial onboarding**
+- Admin is the only entity with access to the admin panel
+- Every new user triggers a notification in the admin panel requesting token allocation
+
+### 🪙 Equal Token Distribution Model
+
+- All users receive an **equal number of governance tokens**
+- Token allocation is controlled through the admin onboarding flow
+- Designed to ensure **fair voting power distribution across the community**
+
+### ⚖️ Anti-Abuse Token Rebalancing System
+
+- Automated logic checks user token balances regularly
+- If a user receives too many tokens:
+  - surplus tokens are automatically returned to the master wallet
+- If a user has too few tokens:
+  - admin is notified to top up the allocation
+- Ensures **consistent fairness across all participants**
+
+### 🗳️ Snapshot-Based Voting System
+
+- Voting power is determined using periodic **snapshots**
+- After token rebalancing, users must wait for the next snapshot before voting
+- Prevents manipulation of voting power during governance cycles
+
+### 📬 Admin Notification System
+
+- Admin receives real-time messages when:
+  - a new user signs up
+  - token allocation is required
+  - imbalance is detected in token distribution
+
+### 🌐 Full-Stack Governance Application
+
+- Frontend built with **Next.js**
+- Backend powered by **MongoDB**
+- Smart contracts handle governance execution
+- Application bridges Web2 onboarding with Web3 governance
 
 ***
-<a id="vision"></a>
-## ✨ Vision
 
-KyotoTechMeetup DAO is a governance-focused project exploring how a community can coordinate decisions through transparent, on-chain mechanisms. The goal is to build a clean and credible base for DAO-style coordination, where execution is driven by proposals, voting power, and timelock-controlled actions rather than trust in an admin wallet.
-
-***
-
-<a id="overview"></a>
-## 🧭 Overview
-
-This project implements a standard governance lifecycle around a governed execution target and an on-chain proposal registry.
-
-### Governance flow
-
-1. Delegate voting power.
-2. Create a proposal.
-3. Vote during the voting period.
-4. Queue a successful proposal in the timelock.
-5. Execute it after the timelock delay.
-6. Update target contract state on-chain.
-
-Two governance flows are used to validate the system:
-
-- `Box` proves that governance can execute a state-changing action end to end.
-- `ProposalRegistry` proves that executed proposals can also be recorded as readable governance history on-chain.
-
-***
 <a id="architecture"></a>
 ## 🧱 Architecture
 
-The system is split into focused contracts so each governance responsibility remains explicit and auditable.
+The system is composed of three layers:
+
+### 🔗 Smart Contract Layer (On-chain Governance)
 
 | Contract | Role |
-|---|---|
-| `GovernanceToken.sol` | Fixed-supply governance token with voting power enabled through delegation. |
-| `MyGovernor.sol` | Core governor contract handling proposals, voting, queueing and execution. |
-| `Timelock.sol` | Timelock contract enforcing delayed execution and owning governed target contracts. |
-| `Box.sol` | Simple storage target used to verify governance execution from proposal to state change. |
-| `ProposalRegistry.sol` | On-chain archive used to record executed proposal entries. |
-| `MockVotesToken.sol` | Testing helper contract used only in the test suite. |
+|----------|------|
+| GovernanceToken.sol | ERC20Votes governance token |
+| MyGovernor.sol | Proposal creation, voting, execution |
+| Timelock.sol | Delayed execution security layer |
+| Box.sol | Example governed contract |
+| ProposalRegistry.sol | On-chain proposal history |
+
+### 🌐 Application Layer (Frontend)
+
+- Next.js application
+- Magic link authentication system
+- Admin dashboard for onboarding and token control
+- User interface for governance participation
+
+### 🗄️ Data Layer (Off-chain coordination)
+
+- MongoDB stores:
+  - user profiles
+  - onboarding state
+  - admin notifications
+  - system events
 
 ***
-<a id="repository-structure"></a>
-## 📦 Repository Structure
 
-```text
-contracts/
-  Box.sol
-  GovernanceToken.sol
-  MockVotesToken.sol
-  MyGovernor.sol
-  ProposalRegistry.sol
-  Timelock.sol
-scripts/
-  deploy.ts
-  runLifecycle.ts
-  run-box-flow.ts
-  run-registry-flow.ts
-test/
-  GovernanceFlow.ts
-  GovernanceToken.ts
-  Governor.defensive.ts
-  Governor.lifecycle.ts
-  ProposalRegistry.ts
-deployments/
-hardhat.config.ts
-```
-
-The deployment flow is driven by `deploy.ts`, which acts as the source of truth for the Sepolia deployment process.
-
-***
 <a id="deployed-contracts"></a>
 ## 🔗 Deployed Contracts
 
@@ -130,31 +151,49 @@ The deployment script is responsible for more than contract creation. It also wi
 - Renounce `DEFAULT_ADMIN_ROLE` from the deployer after setup is complete.
 
 ***
-<a id="token-distribution"></a>
-## 🪙 Token Distribution
+<a id="token-deployment-setup"></a>
+## 🪙 Deployment Token Setup
 
 KTM distribution on Sepolia is intentionally simple and manual for testing and governance validation.
 
-### Sepolia distribution model
-
 - KTM is minted to the deployer wallet during deployment.
 - The deployer acts as the initial master wallet on Sepolia.
-- KTM is manually transferred from the deployer to 3–5 test wallets.
-- Wallets self-delegate after receiving tokens so balances become active voting power.
+- Tokens are transferred from the deployer to a controlled master wallet.
 
-> `ERC20Votes` does not automatically treat token balances as active voting power. Self-delegation is required to activate checkpoints and voting weight.
+
+> ERC20Votes does not automatically treat token balances as active voting power. Self-delegation is required to activate checkpoints and voting weight.
+
+***
+
+<a id="user-token-distribution"></a>
+## 👥 User Token Distribution
+
+### User onboarding flow
+
+- A new user signs up using magic link authentication
+- The system creates a wallet for the user
+- The admin panel receives a notification for token allocation
+- The admin assigns a fixed number of KTM tokens to the user
+- Tokens are transferred from the master wallet to the user wallet
+- The user self-delegates to activate voting power
+
+### Fairness guarantees
+
+- All users receive the same token allocation
+- Excess or missing tokens trigger correction logic
+- Voting power remains consistent across all participants
 
 ***
 <a id="governance-lifecycle"></a>
 ## 🗳️ Governance Lifecycle
 
-The project validates governance through real multi-step flows on Sepolia rather than only through isolated unit tests.
+The project validates governance through real multi-step flows on Sepolia.
 
 ### Box flow
 
 The Box flow proves that a proposal can successfully modify governed contract state on-chain.
 
-1. Propose a call to `Box.store(77)`.
+1. Propose a call to `Box.store()`.
 2. Wait for the proposal to move from `Pending` to `Active`.
 3. Vote using delegated wallets.
 4. Wait until the proposal reaches `Succeeded`.
@@ -173,24 +212,17 @@ The ProposalRegistry flow proves that governance decisions can also be persisted
 4. Verify the new entry’s `id`, `proposalId`, `description`, `proposer`, and `timestamp` on-chain.
 
 ***
-<a id="security-review-status"></a>
-## 🛡️ Security Review Status
+<a id="fairness-safety-mechanisms"></a>
+## 🛡️ Fairness & Safety Mechanisms
 
-The current test suite covers the core governance lifecycle as well as several defensive behaviors that matter in a timelock-governed system.
+The system enforces governance integrity through multiple safeguards:
 
-### Covered scenarios
-
-- Full governance lifecycle: `propose → vote → queue → execute`.
-- Timelock-enforced execution.
-- Direct write protection on `Box` after ownership transfer.
-- Owner-only minting checks on `GovernanceToken` based on the current implementation notes.
-- Revert behavior for unauthorized mint attempts.
-- Revert behavior for unauthorized timelock role grants.
-- Revert behavior for premature queue or execute attempts.
-- Defeated proposal path.
-- Proposal cancellation path in tests.
-
-> For Sepolia v1, the intended public lifecycle remains focused on `propose → vote → queue → execute`.
+- Full lifecycle testing (propose → vote → execute)
+- Timelock protection for all executions
+- Ownership of governed contracts transferred to timelock
+- Protection against unauthorized token minting
+- Snapshot-based voting prevents mid-cycle manipulation
+- Automated imbalance detection in token distribution
 
 ***
 <a id="coverage"></a>
@@ -217,10 +249,23 @@ Coverage is used here as a confidence signal for core production contracts.
 - npm
 - Git
 
+ > [!WARNING]
+> Before installing dependencies, configure npm to ignore packages published within the last **7 days**. This helps reduce the risk of installing newly published malicious packages as part of a supply-chain attack.
+>
+> ```bash
+> npm config set min-release-age 7
+> ```
+
 ### Install dependencies
 
 ```bash
 npm install
+```
+
+### Start the development environment
+
+```bash
+npm run dev
 ```
 
 ### Compile
@@ -242,16 +287,4 @@ npx hardhat test --coverage
 ```
 
 ***
-<a id="sepolia-validation-checklist"></a>
-## 🧪 Sepolia Validation Checklist
 
-Before considering the Sepolia deployment complete, the system should satisfy the following conditions.
-
-- Contracts are deployed and saved to `deployments/sepolia.json`.
-- Governor and timelock wiring is verified on-chain.
-- `Box` and `ProposalRegistry` are owned by the timelock.
-- KTM is distributed to governance test wallets.
-- Voting wallets are self-delegated and show active voting power.
-- One full `Box` proposal lifecycle succeeds on Sepolia.
-- One full `ProposalRegistry` proposal lifecycle succeeds on Sepolia.
-***
