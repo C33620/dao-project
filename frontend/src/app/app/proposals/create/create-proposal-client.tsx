@@ -990,16 +990,18 @@ export default function CreateProposalClient({
 
   return (
     <>
-      <div className="dashboard-section-stack">
-        <div className="dashboard-cta-card">
-          <div className="dashboard-cta-card__content">
-            <p className="section-kicker">{readinessState.label}</p>
-            <h2 className="dashboard-cta-card__title">
+      <div className="grid gap-4">
+        <div className="flex flex-col items-stretch gap-4 justify-between flex-wrap sm:flex-row sm:items-center">
+          <div className="min-w-0">
+            <p className="m-0 text-(--muted-soft) uppercase tracking-[0.08em] text-[0.72rem]">
+              {readinessState.label}
+            </p>
+            <h2 className="mt-[0.45rem] mb-0 text-[clamp(1.4rem,2vw,2rem)] leading-[1.05] tracking-[-0.04em] max-w-[18ch]">
               {mode === "cancel"
                 ? "Create a cancellation proposal"
                 : "Create a proposal"}
             </h2>
-            <p className="dashboard-cta-card__description">
+            <p className="mt-[0.8rem] text-(--muted) leading-[1.65] max-w-[60ch]">
               {readinessState.description}
             </p>
           </div>
@@ -1083,7 +1085,7 @@ export default function CreateProposalClient({
               }}
             >
               <p
-                className="section-kicker"
+                className="m-0 text-(--muted-soft) uppercase tracking-[0.08em] text-[0.72rem]"
                 style={{ margin: 0, color: "rgb(155, 48, 72)" }}
               >
                 Selected proposal
@@ -1182,14 +1184,17 @@ export default function CreateProposalClient({
           ) : null}
 
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <Link href={returnHref} className="button button--secondary">
+            <Link
+              href={returnHref}
+              className="inline-flex min-h-11 items-center justify-center rounded-full px-[1.05rem] py-[0.78rem] border border-transparent text-[0.94rem] font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-160 ease hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0 bg-white/88  text-(--foreground) hover:bg-(--surface) hover:border-(--border-strong)"
+            >
               Cancel
             </Link>
 
             {readinessState.needsDelegation ? (
               <button
                 type="button"
-                className="button button--primary"
+                className="inline-flex min-h-11 items-center justify-center rounded-full px-[1.05rem] py-[0.78rem] border border-transparent text-[0.94rem] font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-160 ease hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0 bg-(--primary) text-white shadow-(--shadow-sm) hover:bg-(--primary-strong)"
                 onClick={() => {
                   void handleEnableProposal();
                 }}
@@ -1200,7 +1205,7 @@ export default function CreateProposalClient({
             ) : (
               <button
                 type="button"
-                className="button button--primary"
+                className="inline-flex min-h-11 items-center justify-center rounded-full px-[1.05rem] py-[0.78rem] border border-transparent text-[0.94rem] font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-160 ease hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0 bg-(--primary) text-white shadow-(--shadow-sm) hover:bg-(--primary-strong)"
                 onClick={handleOpenReview}
                 disabled={isReviewDisabled}
               >
@@ -1239,7 +1244,10 @@ export default function CreateProposalClient({
             }}
           >
             <div style={{ display: "grid", gap: 8 }}>
-              <p className="section-kicker" style={{ margin: 0 }}>
+              <p
+                className="m-0 text-(--muted-soft) uppercase tracking-[0.08em] text-[0.72rem]"
+                style={{ margin: 0 }}
+              >
                 Review
               </p>
               <h2 id="proposal-review-title" style={{ margin: 0 }}>
@@ -1344,7 +1352,7 @@ export default function CreateProposalClient({
             >
               <button
                 type="button"
-                className="button button--secondary"
+                className="inline-flex min-h-11 items-center justify-center rounded-full px-[1.05rem] py-[0.78rem] border border-transparent text-[0.94rem] font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-160 ease hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0 bg-white/88  text-(--foreground) hover:bg-(--surface) hover:border-(--border-strong)"
                 onClick={handleCloseReview}
                 disabled={isSubmittingProposal}
               >
@@ -1353,7 +1361,7 @@ export default function CreateProposalClient({
 
               <button
                 type="button"
-                className="button button--primary"
+                className="inline-flex min-h-11 items-center justify-center rounded-full px-[1.05rem] py-[0.78rem] border border-transparent text-[0.94rem] font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-160 ease hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0 bg-(--primary) text-white shadow-(--shadow-sm) hover:bg-(--primary-strong)"
                 onClick={() => {
                   void handleSubmitGovernorProposal();
                 }}

@@ -262,77 +262,27 @@ export default function AuthPage() {
   }, [status, mode, requiresInviteCode, inviteCode]);
 
   return (
-    <main
-      className="landing-page"
-      style={{
-        minHeight: "100dvh",
-        display: "grid",
-        placeItems: "center",
-        padding: "24px 16px",
-      }}
-    >
-      <section
-        className="landing-hero landing-hero--open"
-        style={{
-          width: "100%",
-          display: "flex",
-          justifyContent: "center",
-          padding: 0,
-        }}
-      >
-        <div
-          className="landing-hero__content"
-          style={{
-            width: "100%",
-            maxWidth: 520,
-            position: "relative",
-            margin: "0 auto",
-            textAlign: "center",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "flex-end",
-              marginBottom: 24,
-            }}
-          >
+    <main className="grid min-h-dvh w-full items-center px-4 py-8">
+      <section className="flex w-full justify-center">
+        <div className="w-full max-w-130 text-center">
+          <div className="mb-6 flex justify-end">
             <Link
               href="/"
-              style={{
-                fontSize: 14,
-                color: "var(--color-text-muted, rgba(17,24,39,0.7))",
-                textDecoration: "none",
-                fontWeight: 500,
-              }}
+              className="text-2xl font-medium text-(--color-text-muted,rgba(17,24,39,0.7)) no-underline mb-8"
             >
               Back
             </Link>
           </div>
 
-          <h1>{title}</h1>
+          <h1 className="text-5xl md:text-8xl font-semibold text-wrap">
+            {title}
+          </h1>
 
-          <p
-            className="landing-hero__lede"
-            style={{
-              marginLeft: "auto",
-              marginRight: "auto",
-              maxWidth: 440,
-            }}
-          >
+          <p className="landing-hero__lede mx-auto max-w-110 ">
             Use your email to get a secure sign-in link and continue to the app.
           </p>
 
-          <div
-            style={{
-              marginTop: 24,
-              width: "100%",
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 8,
-              alignItems: "stretch",
-            }}
-          >
+          <div className="mt-6 grid w-full grid-cols-2 gap-2 items-stretch">
             <button
               type="button"
               onClick={() => {
@@ -343,33 +293,14 @@ export default function AuthPage() {
                 setCheckedEmail("");
               }}
               aria-pressed={mode === "existing"}
-              style={{
-                minHeight: 48,
-                width: "100%",
-                padding: "0 14px",
-                borderRadius: 999,
-                border:
-                  mode === "existing"
-                    ? "1px solid rgba(15, 23, 42, 0.10)"
-                    : "1px solid rgba(15, 23, 42, 0.08)",
-                background:
-                  mode === "existing"
-                    ? "rgba(15, 23, 42, 0.06)"
-                    : "rgba(255, 255, 255, 0.86)",
-                color:
-                  mode === "existing"
-                    ? "rgba(15, 23, 42, 0.92)"
-                    : "rgba(15, 23, 42, 0.68)",
-                fontSize: 14,
-                fontWeight: 500,
-                whiteSpace: "nowrap",
-                boxShadow:
-                  mode === "existing"
-                    ? "0 1px 2px rgba(15, 23, 42, 0.04)"
-                    : "none",
-              }}
+              className={[
+                "min-h-12 w-full whitespace-nowrap rounded-full px-3.5 text-[14px] font-medium",
+                mode === "existing"
+                  ? "border border-[rgba(15,23,42,0.10)] bg-[rgba(15,23,42,0.06)] text-[rgba(15,23,42,0.92)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                  : "border border-[rgba(15,23,42,0.08)] bg-[rgba(255,255,255,0.86)] text-[rgba(15,23,42,0.68)] shadow-none",
+              ].join(" ")}
             >
-              I already have access
+              I have access
             </button>
 
             <button
@@ -380,29 +311,12 @@ export default function AuthPage() {
                 setStatus("idle");
               }}
               aria-pressed={mode === "new"}
-              style={{
-                minHeight: 48,
-                width: "100%",
-                padding: "0 14px",
-                borderRadius: 999,
-                border:
-                  mode === "new"
-                    ? "1px solid rgba(15, 23, 42, 0.10)"
-                    : "1px solid rgba(15, 23, 42, 0.08)",
-                background:
-                  mode === "new"
-                    ? "rgba(15, 23, 42, 0.06)"
-                    : "rgba(255, 255, 255, 0.86)",
-                color:
-                  mode === "new"
-                    ? "rgba(15, 23, 42, 0.92)"
-                    : "rgba(15, 23, 42, 0.68)",
-                fontSize: 14,
-                fontWeight: 500,
-                whiteSpace: "nowrap",
-                boxShadow:
-                  mode === "new" ? "0 1px 2px rgba(15, 23, 42, 0.04)" : "none",
-              }}
+              className={[
+                "min-h-12 w-full whitespace-nowrap rounded-full px-3.5 text-[14px] font-medium",
+                mode === "new"
+                  ? "border border-[rgba(15,23,42,0.10)] bg-[rgba(15,23,42,0.06)] text-[rgba(15,23,42,0.92)] shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                  : "border border-[rgba(15,23,42,0.08)] bg-[rgba(255,255,255,0.86)] text-[rgba(15,23,42,0.68)] shadow-none",
+              ].join(" ")}
             >
               I am new here
             </button>
@@ -410,39 +324,23 @@ export default function AuthPage() {
 
           <form
             onSubmit={handleSubmit}
-            style={{
-              display: "grid",
-              gap: 16,
-              marginTop: 28,
-              width: "100%",
-              textAlign: "left",
-            }}
+            className="mt-7 grid w-full gap-4 text-left"
           >
             {mode === "new" ? (
-              <label style={{ display: "grid", gap: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 500 }}>Name</span>
+              <label className="grid gap-2">
+                <span className="text-[14px] font-medium">Name</span>
                 <input
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="Your name"
                   required
-                  style={{
-                    width: "100%",
-                    minHeight: 52,
-                    padding: "0 16px",
-                    borderRadius: 14,
-                    border: "1px solid rgba(15, 23, 42, 0.12)",
-                    background: "rgba(255,255,255,0.92)",
-                    outline: "none",
-                    fontSize: 16,
-                    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-                  }}
+                  className="min-h-13 w-full rounded-[14px] border border-[rgba(15,23,42,0.12)] bg-[rgba(255,255,255,0.92)] px-4 text-[16px] outline-none shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
                 />
               </label>
             ) : null}
 
-            <label style={{ display: "grid", gap: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 500 }}>Email</span>
+            <label className="grid gap-2">
+              <span className="text-[14px] font-medium">Email</span>
               <input
                 type="email"
                 value={email}
@@ -463,25 +361,13 @@ export default function AuthPage() {
                 }}
                 placeholder="name@example.com"
                 required
-                style={{
-                  width: "100%",
-                  minHeight: 52,
-                  padding: "0 16px",
-                  borderRadius: 14,
-                  border: "1px solid rgba(15, 23, 42, 0.12)",
-                  background: "rgba(255,255,255,0.92)",
-                  outline: "none",
-                  fontSize: 16,
-                  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-                }}
+                className="min-h-13 w-full rounded-[14px] border border-[rgba(15,23,42,0.12)] bg-[rgba(255,255,255,0.92)] px-4 text-[16px] outline-none shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
               />
             </label>
 
             {mode === "new" ? (
-              <label style={{ display: "grid", gap: 8 }}>
-                <span style={{ fontSize: 14, fontWeight: 500 }}>
-                  Activation code
-                </span>
+              <label className="grid gap-2">
+                <span className="text-[14px] font-medium">Activation code</span>
                 <input
                   type="text"
                   value={inviteCode}
@@ -490,48 +376,24 @@ export default function AuthPage() {
                   }
                   placeholder="Enter your activation code"
                   autoComplete="off"
-                  style={{
-                    width: "100%",
-                    minHeight: 52,
-                    padding: "0 16px",
-                    borderRadius: 14,
-                    border: "1px solid rgba(15, 23, 42, 0.12)",
-                    background: "rgba(255,255,255,0.92)",
-                    outline: "none",
-                    fontSize: 16,
-                    textTransform: "uppercase",
-                    boxShadow: "0 1px 2px rgba(15, 23, 42, 0.04)",
-                  }}
+                  className="min-h-13 w-full rounded-[14px] border border-[rgba(15,23,42,0.12)] bg-[rgba(255,255,255,0.92)] px-4 text-[16px] uppercase outline-none shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
                 />
               </label>
             ) : null}
 
             {mode === "new" ? (
-              <p
-                style={{
-                  marginTop: -4,
-                  fontSize: 13,
-                  color: "var(--color-text-muted, rgba(17,24,39,0.7))",
-                }}
-              >
+              <p className="mt-1 text-[13px] text-(--color-text-muted,rgba(17,24,39,0.7))">
                 {requiresInviteCode === false
                   ? "No activation code is required for the first account."
                   : "You need an activation code to create an account."}
               </p>
             ) : null}
 
-            <div
-              className="landing-hero__actions"
-              style={{
-                justifyContent: "center",
-                marginTop: 8,
-              }}
-            >
+            <div className="landing-hero__actions mt-2 justify-center">
               <button
                 type="submit"
-                className="button button--primary landing-hero__cta"
+                className="button button--primary landing-hero__cta min-w-45"
                 disabled={status === "submitting"}
-                style={{ minWidth: 180 }}
               >
                 {submitLabel}
               </button>
@@ -540,14 +402,11 @@ export default function AuthPage() {
 
           {message ? (
             <p
-              style={{
-                marginTop: 16,
-                textAlign: "center",
-                color:
-                  status === "error"
-                    ? "rgb(185, 28, 28)"
-                    : "var(--color-text-muted, rgba(17,24,39,0.75))",
-              }}
+              className={
+                status === "error"
+                  ? "mt-4 text-center text-[rgb(185,28,28)]"
+                  : "mt-4 text-center text-(--color-text-muted,rgba(17,24,39,0.75))"
+              }
               aria-live="polite"
             >
               {message}

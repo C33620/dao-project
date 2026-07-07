@@ -12,21 +12,21 @@ export default function ProposalsPage() {
     <PageShell title="" description="">
       <ProposalsAutoRefresh />
 
-      <div className="page-shell__content">
+      <div className="grid gap-5">
         <SectionCard
           title="Create a proposal"
           description="Write a proposal for the group to review and vote on."
         >
-          <div className="dashboard-section-stack">
+          <div className="grid gap-4">
             <CreateProposalEntryCard origin="proposals" description="" />
           </div>
         </SectionCard>
 
         <SectionCard
           title="Cancel a proposal"
-          description="Cancel an existing proposal."
+          description="Create a proposal to cancel a previously executed proposal."
         >
-          <div className="dashboard-section-stack">
+          <div className="grid gap-4">
             <CancelProposalEntryCard origin="proposals" description="" />
           </div>
         </SectionCard>

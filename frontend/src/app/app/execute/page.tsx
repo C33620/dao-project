@@ -16,7 +16,7 @@ export default async function ExecutePage() {
 
   return (
     <PageShell title="" description="">
-      <div className="page-shell__content">
+      <div className="grid gap-5">
         <SectionCard
           title="Ready to queue"
           description="These proposals passed the vote and must be queued before execution."

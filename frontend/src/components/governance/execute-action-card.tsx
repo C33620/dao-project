@@ -73,15 +73,17 @@ export function ExecuteActionCard({
   }
 
   return (
-    <div className="action-panel action-panel--interactive action-panel--queue">
-      <div className="action-panel__row action-panel__row--queue">
-        <span>Execution status</span>
+    <div className="grid gap-4 p-[1.15rem_1.2rem] rounded-[1.1rem] border border-(--border) bg-white/72 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_10px_30px_rgba(15,23,42,0.04)] w-full">
+      <div className="flex flex-col items-start justify-start gap-4 pb-[0.85rem] border-b border-[rgba(214,218,225,0.52)] last-of-type:pb-0 last-of-type:border-0 w-full sm:flex-row sm:items-center sm:justify-between">
+        <span className="flex-none w-full text-left text-(--muted-soft) text-[0.76rem] uppercase tracking-[0.07em] font-bold sm:w-auto">
+          Execution status
+        </span>
         <strong
-          className={`action-panel__status-message${
+          className={`flex-1 min-w-0 text-left text-[0.95rem] leading-[1.45]${
             status === "success"
-              ? " action-panel__status-message--success"
+              ? " text-(--success)"
               : status === "error"
-              ? " action-panel__status-message--error"
+              ? " text-(--danger)"
               : ""
           }`}
         >
@@ -89,7 +91,7 @@ export function ExecuteActionCard({
         </strong>
       </div>
 
-      <div className="action-panel__actions">
+      <div className="w-full">
         <button
           type="button"
           className={buttonClassName}

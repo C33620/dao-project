@@ -11,29 +11,20 @@ export function CreateProposalEntryCard({
 }: CreateProposalEntryCardProps) {
   return (
     <section
-      className="dashboard-cta-card"
+      className=" min-h-0 sm:px-4 sm:py-4"
       aria-labelledby={`create-proposal-${origin}`}
     >
-      <div
-        className="dashboard-cta-card__content"
-        style={{
-          display: "grid",
-          gap: 12,
-          justifyItems: "start",
-          textAlign: "left",
-        }}
-      >
+      <div className="dashboard-cta-card__content grid justify-items-start gap-3 text-left">
         <Link
           href={`/app/proposals/create?from=${origin}`}
-          className="button button--primary"
+          className="button button--primary sm:!-ml-4 w-auto max-w-full"
         >
           Create a new proposal
         </Link>
 
         <p
           id={`create-proposal-${origin}`}
-          className="dashboard-cta-card__description"
-          style={{ margin: 0, maxWidth: "48ch" }}
+          className="dashboard-cta-card__description m-0 max-w-[48ch]"
         >
           {description}
         </p>

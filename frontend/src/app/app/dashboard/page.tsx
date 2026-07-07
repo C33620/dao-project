@@ -31,39 +31,42 @@ export default async function DashboardPage() {
 
   return (
     <PageShell title="" description="">
-      <div className="dashboard-stack">
+      <div className="grid gap-5">
         <SectionCard
           title="Create a proposal"
           description="Write a proposal for the group to review and vote on."
         >
-          <div className="dashboard-section-stack">
+          <div className="grid gap-4">
             <CreateProposalEntryCard origin="proposals" description="" />
           </div>
         </SectionCard>
 
         <SectionCard
           title="Cancel a proposal"
-          description="Cancel an existing proposal."
+          description="Create a proposal to cancel a previously executed proposal."
         >
-          <div className="dashboard-section-stack">
+          <div className="grid gap-4">
             <CancelProposalEntryCard origin="proposals" description="" />
           </div>
         </SectionCard>
 
-        <div className="two-column-layout">
+        <div className="flex flex-col gap-5">
           <SectionCard
             title="Voted proposals"
             description="A preview of recent governance outcomes."
           >
-            <div className="dashboard-section-stack">
+            <div className="grid gap-4">
               <GovernanceActivityPreview
                 items={votedPreview}
                 emptyTitle="No voted proposals yet"
                 emptyDescription="Recent voted proposals will appear here once activity exists."
               />
 
-              <div className="dashboard-section-stack__footer">
-                <Link href="/app/history" className="button button--secondary">
+              <div className="flex justify-start pt-1">
+                <Link
+                  href="/app/history"
+                  className="inline-flex min-h-11 items-center justify-center rounded-full px-[1.05rem] py-[0.78rem] border border-transparent text-[0.94rem] font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-160 ease hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0 bg-white/88 text-(--foreground) hover:bg-(--surface) hover:border-(--border-strong)"
+                >
                   View more
                 </Link>
               </div>
@@ -74,14 +77,17 @@ export default async function DashboardPage() {
             title="Proposals to validate"
             description="Discover proposals that need action."
           >
-            <div className="dashboard-section-stack">
+            <div className="grid gap-4">
               <ActionableProposalsPreview
                 queueableProposals={queueableProposals}
                 executableProposals={executableProposals}
               />
 
-              <div className="dashboard-section-stack__footer">
-                <Link href="/app/execute" className="button button--secondary">
+              <div className="flex justify-start pt-1">
+                <Link
+                  href="/app/execute"
+                  className="inline-flex min-h-11 items-center justify-center rounded-full px-[1.05rem] py-[0.78rem] border border-transparent text-[0.94rem] font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-160 ease hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0 bg-white/88 text-(--foreground) hover:bg-(--surface) hover:border-(--border-strong)"
+                >
                   View more
                 </Link>
               </div>

@@ -14,25 +14,30 @@ export function GovernanceActivityPreview({
 }: GovernanceActivityPreviewProps) {
   if (items.length === 0) {
     return (
-      <div className="empty-state empty-state--compact">
-        <div className="empty-state__icon" aria-hidden="true">
+      <div className="grid place-items-center gap-[0.6rem] min-h-45 p-8 text-center bg-white/90 border border-dashed border-(--border-strong) rounded-md">
+        <div
+          className="w-12 h-12 grid place-items-center rounded-full bg-(--surface-subtle) text-(--muted-soft) text-[1.4rem]"
+          aria-hidden="true"
+        >
           ≣
         </div>
-        <h2>{emptyTitle}</h2>
-        <p>{emptyDescription}</p>
+        <h2 className="m-0 text-[1.1rem] tracking-[-0.02em]">{emptyTitle}</h2>
+        <p className="m-0 text-(--muted) max-w-[44ch] leading-[1.6]">
+          {emptyDescription}
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="activity-feed">
+    <div className="grid gap-[0.9rem]">
       {items.map((item) => {
         const isDanger = item.tone === "danger";
 
         return (
           <article
             key={item.id}
-            className="activity-feed__item"
+            className="grid grid-cols-[16px_1fr] gap-[0.85rem] items-start"
             style={
               isDanger
                 ? {
@@ -42,7 +47,7 @@ export function GovernanceActivityPreview({
             }
           >
             <div
-              className="activity-feed__marker"
+              className="w-[0.7rem] h-[0.7rem] rounded-full bg-[rgb(23,252,2)] mt-[0.45rem] opacity-[0.16]"
               aria-hidden="true"
               style={
                 isDanger
@@ -55,7 +60,7 @@ export function GovernanceActivityPreview({
             />
 
             <div
-              className="activity-feed__content"
+              className="py-[0.95rem] px-4 rounded-2xl border border-[#e1efdf] bg-[rgba(189,249,184,0.6)]"
               style={
                 isDanger
                   ? {
@@ -65,15 +70,21 @@ export function GovernanceActivityPreview({
                   : undefined
               }
             >
-              <div className="activity-feed__topline">
-                <h3>{item.title}</h3>
-                <span>{item.occurredAt}</span>
+              <div className="flex flex-col items-start gap-4 flex-wrap min-[900px]:flex-row min-[900px]:justify-between min-[900px]:items-baseline">
+                <h3 className="m-0 text-[0.98rem] tracking-[-0.01em]">
+                  {item.title}
+                </h3>
+                <span className="text-(--muted-soft) text-[0.82rem]">
+                  {item.occurredAt}
+                </span>
               </div>
 
-              <p>{item.description}</p>
+              <p className="mt-[0.45rem] text-(--muted) leading-[1.58]">
+                {item.description}
+              </p>
 
               {item.relatedProposalCategory ? (
-                <p>
+                <p className="mt-[0.45rem] text-(--muted) leading-[1.58]">
                   Category:{" "}
                   {getProposalCategoryLabel(item.relatedProposalCategory)}
                 </p>

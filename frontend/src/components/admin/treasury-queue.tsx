@@ -295,44 +295,49 @@ export function TreasuryQueue({
   }
 
   return (
-    <div className="treasury-queue">
+    <div className="grid gap-5 mb-8">
       {feedback.type ? (
         <div
           className={
             feedback.type === "success"
-              ? "status-badge status-badge--success treasury-page-feedback"
-              : "status-badge status-badge--danger treasury-page-feedback"
+              ? "inline-flex items-center gap-[0.45rem] min-h-7 px-[0.62rem] py-[0.32rem] rounded-full border text-[0.72rem] font-bold tracking-[0.01em] whitespace-nowrap text-(--success) bg-[#edf7f1] border-[#d5e9dc] fixed top-28 z-25 w-full sm:w-fit max-w-[min(100%,42rem)] mb-2"
+              : "inline-flex items-center gap-[0.45rem] min-h-7 px-[0.62rem] py-[0.32rem] rounded-full border text-[0.72rem] font-bold tracking-[0.01em] whitespace-nowrap text-(--danger) bg-[#faedf1] border-[#efd6dd] fixed top-28 z-25 w-full sm:w-fit max-w-[min(100%,42rem)] mb-2"
           }
           role="status"
           aria-live="polite"
         >
-          <span className="status-badge__dot" />
-          <span className="status-badge__label">{feedback.message}</span>
+          <span className="w-[0.42rem] h-[0.42rem] rounded-full bg-current opacity-[0.72] flex-none" />
+          <span className="leading-[1.35] whitespace-normal">
+            {feedback.message}
+          </span>
         </div>
       ) : null}
-
-      <section className="section-card section-card-1">
-        <div className="section-card__header">
+      <section className="bg-white/88 border border-(--border) rounded-md shadow-(--shadow-sm) backdrop-blur-md mt-12">
+        <div className="flex gap-4 items-start justify-between flex-wrap pt-[1.3rem] px-[1.3rem]">
           <div>
-            <h2 className="section-card__title">Pending</h2>
-            <p className="section-card__description">
+            <h2 className="m-0 text-[1.02rem] leading-[1.2] tracking-[-0.02em]">
+              Pending
+            </h2>
+            <p className="mt-[0.4rem] mb-0 text-(--muted) text-[0.93rem] leading-[1.55] max-w-[58ch]">
               Copy the exact transfer details, send the transfer in MetaMask,
               then paste the transaction hash here.
             </p>
           </div>
 
-          <span className="status-badge status-badge--pending">
-            <span className="status-badge__dot" />
-            <span className="status-badge__label">
+          <span className="inline-flex items-center gap-[0.45rem] min-h-7 px-[0.62rem] py-[0.32rem] rounded-full border text-[0.72rem] font-bold tracking-[0.01em] whitespace-nowrap text-(--pending) bg-[#f3effb] border-[#e3d9f7]">
+            <span className="w-[0.42rem] h-[0.42rem] rounded-full bg-current opacity-[0.72] flex-none" />
+            <span className="leading-[1.35] whitespace-normal">
               {pendingItems.length} open
             </span>
           </span>
         </div>
 
-        <div className="section-card__content">
+        <div className="p-[1.3rem]">
           {pendingItems.length === 0 ? (
-            <div className="empty-state empty-state--compact">
-              <div className="empty-state__icon">✓</div>
+            <div className="grid place-items-center gap-[0.6rem] min-h-45 p-8 text-center bg-white/90 border border-dashed border-(--border-strong) rounded-md">
+              <div className="w-12 h-12 grid place-items-center rounded-full bg-(--surface-subtle) text-(--muted-soft) text-[1.4rem]">
+                ✓
+              </div>
               <h2>No pending treasury items</h2>
               <p>
                 All queued allocations and gas funding items have already been
@@ -340,39 +345,42 @@ export function TreasuryQueue({
               </p>
             </div>
           ) : (
-            <div className="treasury-queue__list">
+            <div className="grid gap-4">
               {pendingItems.map((item) => {
                 const formattedAmount = formatAmountBaseUnits(
                   item.amountBaseUnits,
                 );
 
                 return (
-                  <article key={item.id} className="treasury-row">
-                    <div className="treasury-row__top">
-                      <div className="treasury-row__identity">
-                        <p className="treasury-row__eyebrow">
+                  <article
+                    key={item.id}
+                    className="grid gap-4 p-4 rounded-2xl border border-(--border) bg-white/78"
+                  >
+                    <div className="flex justify-between items-start gap-4 flex-wrap">
+                      <div className="min-w-0 flex-[1_1_320px]">
+                        <p className="m-0 text-(--muted-soft) uppercase tracking-[0.08em] text-[0.72rem]">
                           {getKindLabel(item.kind)}
                         </p>
-                        <h3 className="treasury-row__title">
+                        <h3 className="mt-[0.38rem] mb-0 text-[1.02rem] leading-[1.2] tracking-[-0.02em]">
                           {item.user.displayName || "Unnamed member"}
                         </h3>
-                        <p className="treasury-row__subtitle">
+                        <p className="mt-[0.4rem] mb-0 text-(--muted) text-[0.92rem] leading-[1.55] wrap-anywhere">
                           {item.user.email || "No email recorded"}
                         </p>
                       </div>
 
                       <span className={getStatusBadgeClass(item.status)}>
-                        <span className="status-badge__dot" />
-                        <span className="status-badge__label">
-                          {item.status}
-                        </span>
+                        <span className="w-[0.42rem] h-[0.42rem] rounded-full bg-current opacity-[0.72] flex-none" />
+                        <span className="leading-none">{item.status}</span>
                       </span>
                     </div>
 
-                    <dl className="treasury-row__meta">
-                      <div>
-                        <dt>Recipient</dt>
-                        <dd>
+                    <dl className="grid gap-[0.85rem] grid-cols-1 min-[900px]:grid-cols-2 m-0">
+                      <div className="min-w-0">
+                        <dt className="text-(--muted-soft) text-[0.76rem] uppercase tracking-[0.06em]">
+                          Recipient
+                        </dt>
+                        <dd className="mt-1 font-bold tracking-[-0.01em] wrap-anywhere">
                           <ValueWithCopy
                             value={item.walletAddress}
                             label="recipient address"
@@ -380,20 +388,28 @@ export function TreasuryQueue({
                           />
                         </dd>
                       </div>
-                      <div>
-                        <dt>Amount</dt>
-                        <dd>{formattedAmount}</dd>
+                      <div className="min-w-0">
+                        <dt className="text-(--muted-soft) text-[0.76rem] uppercase tracking-[0.06em]">
+                          Amount
+                        </dt>
+                        <dd className="mt-1 font-bold tracking-[-0.01em] wrap-anywhere">
+                          {formattedAmount}
+                        </dd>
                       </div>
-                      <div>
-                        <dt>Asset</dt>
-                        <dd>{getAssetLabel(item)}</dd>
+                      <div className="min-w-0">
+                        <dt className="text-(--muted-soft) text-[0.76rem] uppercase tracking-[0.06em]">
+                          Asset
+                        </dt>
+                        <dd className="mt-1 font-bold tracking-[-0.01em] wrap-anywhere">
+                          {getAssetLabel(item)}
+                        </dd>
                       </div>
                       <div>
                         <dt>Chain</dt>
                         <dd>{item.chainId}</dd>
                       </div>
                       {item.tokenAddress ? (
-                        <div className="treasury-row__meta--full">
+                        <div className="col-span-full min-w-0">
                           <dt>Token address</dt>
                           <dd>
                             <ValueWithCopy
@@ -406,9 +422,9 @@ export function TreasuryQueue({
                       ) : null}
                     </dl>
 
-                    <div className="button-row treasury-row__utility-actions">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap items-stretch pt-[0.15rem]">
                       <a
-                        className="button button--secondary"
+                        className="inline-flex min-h-11 items-center justify-center rounded-full px-[1.05rem] py-[0.78rem] border text-[0.94rem] font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-160 ease hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0 bg-white/88 border-(--border) text-(--foreground) hover:bg-(--surface) hover:border-(--border-strong) w-full sm:w-auto"
                         href={getSepoliaAddressUrl(item.walletAddress)}
                         target="_blank"
                         rel="noopener noreferrer"
@@ -418,7 +434,7 @@ export function TreasuryQueue({
 
                       {item.tokenAddress ? (
                         <a
-                          className="button button--secondary"
+                          className="inline-flex min-h-11 items-center justify-center rounded-full px-[1.05rem] py-[0.78rem] border  text-[0.94rem] font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-160 ease hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0 bg-white/88 border-(--border) text-(--foreground) hover:bg-(--surface) hover:border-(--border-strong) w-full sm:w-auto"
                           href={getSepoliaAddressUrl(item.tokenAddress)}
                           target="_blank"
                           rel="noopener noreferrer"
@@ -431,7 +447,7 @@ export function TreasuryQueue({
                     <details className="treasury-row__details">
                       <summary>Details</summary>
 
-                      <dl className="treasury-row__meta treasury-row__meta--details">
+                      <dl className="grid gap-[0.85rem] grid-cols-1 min-[900px]:grid-cols-2 m-0 treasury-row__meta--details">
                         <div>
                           <dt>Created</dt>
                           <dd>{formatDateTime(item.createdAt)}</dd>
@@ -451,9 +467,9 @@ export function TreasuryQueue({
                       </dl>
                     </details>
 
-                    <div className="treasury-row__submit">
+                    <div className="grid gap-[0.9rem] grid-cols-1 items-stretch min-[900px]:grid-cols-[minmax(0,1fr)_auto] min-[900px]:items-end">
                       <label
-                        className="treasury-row__field"
+                        className="grid gap-[0.45rem]"
                         htmlFor={`txHash-${item.id}`}
                       >
                         <span>Transaction hash</span>
@@ -475,7 +491,7 @@ export function TreasuryQueue({
 
                       <button
                         type="button"
-                        className="button button--primary"
+                        className="inline-flex min-h-11 items-center justify-center rounded-full px-[1.05rem] py-[0.78rem] border border-transparent text-[0.94rem] font-bold tracking-[-0.01em] transition-[background-color,border-color,color,box-shadow,transform] duration-160 ease hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60 disabled:translate-y-0 bg-(--primary) text-white shadow-(--shadow-sm) hover:bg-(--primary-strong) w-full sm:w-auto"
                         onClick={() => handleSubmit(item.id)}
                         disabled={loadingId === item.id}
                       >
@@ -490,10 +506,12 @@ export function TreasuryQueue({
         </div>
       </section>
 
-      <section className="section-card">
-        <div className="section-card__header">
+      <section className="bg-white/88 border border-(--border) rounded-md shadow-(--shadow-sm) backdrop-blur-md">
+        <div className="flex gap-4 items-start justify-between flex-wrap pt-[1.3rem] px-[1.3rem]">
           <div>
-            <h2 className="section-card__title">Submitted</h2>
+            <h2 className="m-0 text-[1.02rem] leading-[1.2] tracking-[-0.02em]">
+              Submitted
+            </h2>
             <p className="section-card__description">
               These transfers already have a transaction hash. Reconcile them to
               confirm on-chain success and complete setup.

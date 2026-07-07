@@ -8,7 +8,7 @@ export default async function HistoryPage() {
 
   return (
     <PageShell title="" description="">
-      <div className="page-shell__content">
+      <div className="grid gap-5">
         <SectionCard
           title="Executed proposals"
           description="Only proposals that reached execution appear here, newest first."

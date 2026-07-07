@@ -399,12 +399,17 @@ export function ProposalList({
 
   if (proposals.length === 0) {
     return (
-      <div className="empty-state">
-        <div className="empty-state__icon" aria-hidden="true">
+      <div className="grid place-items-center gap-[0.6rem] min-h-60 p-8 text-center bg-white/90 border border-dashed border-(--border-strong) rounded-md">
+        <div
+          className="w-12 h-12 grid place-items-center rounded-full bg-(--surface-subtle) text-(--muted-soft) text-[1.4rem]"
+          aria-hidden="true"
+        >
           ≣
         </div>
-        <h2>{emptyTitle}</h2>
-        <p>{emptyDescription}</p>
+        <h2 className="m-0 text-[1.1rem] tracking-[-0.02em]">{emptyTitle}</h2>
+        <p className="m-0 text-(--muted) max-w-[44ch] leading-[1.6]">
+          {emptyDescription}
+        </p>
       </div>
     );
   }
@@ -425,22 +430,22 @@ export function ProposalList({
           <div
             className={
               governanceFeedback.type === "success"
-                ? "status-badge status-badge--success treasury-page-feedback"
+                ? "inline-flex items-center gap-[0.45rem] min-h-7 px-[0.62rem] py-[0.32rem] rounded-full border text-[0.72rem] font-bold tracking-[0.01em] whitespace-nowrap text-(--success) bg-[#edf7f1] border-[#d5e9dc] fixed top-28 z-25 w-full sm:w-fit max-w-[min(100%,42rem)] mb-2"
                 : governanceFeedback.type === "info"
-                ? "status-badge status-badge--info treasury-page-feedback"
-                : "status-badge status-badge--danger treasury-page-feedback"
+                ? "inline-flex items-center gap-[0.45rem] min-h-7 px-[0.62rem] py-[0.32rem] rounded-full border text-[0.72rem] font-bold tracking-[0.01em] whitespace-nowrap text-(--info) bg-[#eef5fc] border-[#d9e6f5] fixed top-28 z-25 w-full sm:w-fit max-w-[min(100%,42rem)] mb-2"
+                : "inline-flex items-center gap-[0.45rem] min-h-7 px-[0.62rem] py-[0.32rem] rounded-full border text-[0.72rem] font-bold tracking-[0.01em] whitespace-nowrap text-(--danger) bg-[#faedf1] border-[#efd6dd] fixed top-28 z-25 w-full sm:w-fit max-w-[min(100%,42rem)] mb-2"
             }
             role="status"
             aria-live="polite"
           >
-            <span className="status-badge__dot" />
-            <span className="status-badge__label">
+            <span className="w-[0.42rem] h-[0.42rem] rounded-full bg-current opacity-[0.72] flex-none" />
+            <span className="leading-[1.35] whitespace-normal">
               {governanceFeedback.message}
             </span>
           </div>
         ) : null}
 
-        <div className="proposal-list">
+        <div className="grid gap-4">
           {proposals.map((proposal) => (
             <ProposalCard
               key={proposal.id}

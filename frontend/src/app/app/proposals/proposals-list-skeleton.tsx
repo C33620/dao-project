@@ -1,6 +1,5 @@
 import { SectionCard } from "@/components/ui/section-card";
 
-
 export function ProposalsListSkeleton() {
   return (
     <div aria-busy="true" aria-live="polite">
@@ -9,7 +8,7 @@ export function ProposalsListSkeleton() {
         description="Loading active and pending proposals..."
       >
         <div
-          className="dashboard-section-stack"
+          className="grid gap-4"
           aria-hidden="true"
           style={{ minHeight: 360 }}
         >
@@ -24,7 +23,7 @@ export function ProposalsListSkeleton() {
               }}
             >
               <div
-                className="proposal-skeleton proposal-skeleton--title"
+                className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                 style={{
                   height: 18,
                   width: "38%",
@@ -33,7 +32,7 @@ export function ProposalsListSkeleton() {
                 }}
               />
               <div
-                className="proposal-skeleton"
+                className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                 style={{
                   height: 14,
                   width: "72%",
@@ -42,7 +41,7 @@ export function ProposalsListSkeleton() {
                 }}
               />
               <div
-                className="proposal-skeleton"
+                className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                 style={{
                   height: 14,
                   width: "56%",
@@ -58,7 +57,7 @@ export function ProposalsListSkeleton() {
                 }}
               >
                 <div
-                  className="proposal-skeleton"
+                  className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                   style={{
                     height: 28,
                     width: 92,
@@ -66,7 +65,7 @@ export function ProposalsListSkeleton() {
                   }}
                 />
                 <div
-                  className="proposal-skeleton"
+                  className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                   style={{
                     height: 28,
                     width: 120,

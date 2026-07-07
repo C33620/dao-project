@@ -249,7 +249,8 @@ async function queueSingleDistributionForUser(
 
   if (
     existing?.status === TreasuryDistributionStatus.SUCCEEDED &&
-    config.kind !== LOW_BALANCE_GAS_REFILL_KIND
+    config.kind !== LOW_BALANCE_GAS_REFILL_KIND &&
+    config.kind !== GOVERNANCE_REBALANCE_TOPUP_KIND
   ) {
     await writeTreasuryAuditEvent({
       userId: input.userId,
@@ -290,17 +291,20 @@ async function queueSingleDistributionForUser(
           amountBaseUnits: config.amountBaseUnits,
           processedAt: new Date(),
           submittedAt:
-            config.kind === LOW_BALANCE_GAS_REFILL_KIND &&
+            (config.kind === LOW_BALANCE_GAS_REFILL_KIND ||
+              config.kind === GOVERNANCE_REBALANCE_TOPUP_KIND) &&
             existing.status === TreasuryDistributionStatus.SUCCEEDED
               ? null
               : existing.submittedAt,
           confirmedAt:
-            config.kind === LOW_BALANCE_GAS_REFILL_KIND &&
+            (config.kind === LOW_BALANCE_GAS_REFILL_KIND ||
+              config.kind === GOVERNANCE_REBALANCE_TOPUP_KIND) &&
             existing.status === TreasuryDistributionStatus.SUCCEEDED
               ? null
               : existing.confirmedAt,
           txHash:
-            config.kind === LOW_BALANCE_GAS_REFILL_KIND &&
+            (config.kind === LOW_BALANCE_GAS_REFILL_KIND ||
+              config.kind === GOVERNANCE_REBALANCE_TOPUP_KIND) &&
             existing.status === TreasuryDistributionStatus.SUCCEEDED
               ? null
               : existing.txHash,

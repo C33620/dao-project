@@ -26,7 +26,7 @@ export function ExecutableProposalsList({
   }
 
   return (
-    <div className="execution-list">
+    <div className="grid gap-[0.9rem]">
       {proposals.length > 0 ? (
         proposals.map((proposal) => {
           const isCancelProposal = proposal.kind === "cancel";
@@ -34,7 +34,7 @@ export function ExecutableProposalsList({
           return (
             <article
               key={proposal.id}
-              className="execution-item execution-item--stacked"
+              className="flex flex-col gap-[0.9rem] p-4 rounded-2xl border border-(--border) bg-(--surface-subtle)"
               style={
                 isCancelProposal
                   ? {
@@ -44,12 +44,14 @@ export function ExecutableProposalsList({
                   : undefined
               }
             >
-              <div className="execution-item__topline">
+              <div className="flex w-full justify-between items-start gap-4 flex-wrap">
                 <div className="execution-item__headline">
-                  <p className="execution-item__category">
+                  <p className="m-0 text-(--muted-soft) text-[0.74rem] uppercase tracking-[0.08em]">
                     {getProposalCategoryLabel(proposal.category)}
                   </p>
-                  <h3 className="execution-item__title">{proposal.title}</h3>
+                  <h3 className="mt-[0.35rem] mb-0 text-base tracking-[-0.02em]">
+                    {proposal.title}
+                  </h3>
                 </div>
 
                 <div className="execution-item__status">
@@ -64,16 +66,22 @@ export function ExecutableProposalsList({
                 </div>
               </div>
 
-              <p className="execution-item__body">{proposal.excerpt}</p>
+              <p className="m-0 text-(--muted) leading-[1.6] max-w-[62ch]">
+                {proposal.excerpt}
+              </p>
 
-              <dl className="execution-item__meta">
+              <dl className="grid gap-3 grid-cols-1 min-[900px]:grid-cols-2">
                 <div>
-                  <dt>Executable</dt>
-                  <dd>{proposal.executableAt ?? "Waiting"}</dd>
+                  <dt className="text-(--muted-soft) text-[0.75rem] uppercase tracking-[0.06em]">
+                    Executable
+                  </dt>
+                  <dd className="mt-1 font-bold">
+                    {proposal.executableAt ?? "Waiting"}
+                  </dd>
                 </div>
               </dl>
 
-              <div className="proposal-card__action-slot">
+              <div className="relative w-full min-w-0 block *:w-full *:min-w-0">
                 <ExecuteActionCard
                   proposal={proposal}
                   onExecuted={handleExecuted}
@@ -83,12 +91,17 @@ export function ExecutableProposalsList({
           );
         })
       ) : (
-        <div className="empty-state">
-          <div className="empty-state__icon" aria-hidden="true">
+        <div className="grid place-items-center gap-[0.6rem] min-h-60 p-8 text-center bg-white/90 border border-dashed border-(--border-strong) rounded-md">
+          <div
+            className="w-12 h-12 grid place-items-center rounded-full bg-(--surface-subtle) text-(--muted-soft) text-[1.4rem]"
+            aria-hidden="true"
+          >
             ≣
           </div>
-          <h2>Nothing needs execution right now</h2>
-          <p>
+          <h2 className="m-0 text-[1.1rem] tracking-[-0.02em]">
+            Nothing needs execution right now
+          </h2>
+          <p className="m-0 text-(--muted) max-w-[44ch] leading-[1.6]">
             Only proposals that are fully ready for execution appear on this
             page.
           </p>

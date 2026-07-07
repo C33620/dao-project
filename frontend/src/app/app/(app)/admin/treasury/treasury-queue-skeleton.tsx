@@ -8,7 +8,7 @@ export function TreasuryQueueSkeleton() {
         description="Loading pending and submitted treasury distributions..."
       >
         <div
-          className="dashboard-section-stack"
+          className="grid gap-4"
           aria-hidden="true"
           style={{ minHeight: 420 }}
         >
@@ -38,7 +38,7 @@ export function TreasuryQueueSkeleton() {
                   }}
                 >
                   <div
-                    className="proposal-skeleton"
+                    className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                     style={{
                       height: 14,
                       width: "24%",
@@ -47,7 +47,7 @@ export function TreasuryQueueSkeleton() {
                     }}
                   />
                   <div
-                    className="proposal-skeleton"
+                    className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                     style={{
                       height: 28,
                       width: 110,
@@ -57,7 +57,7 @@ export function TreasuryQueueSkeleton() {
                 </div>
 
                 <div
-                  className="proposal-skeleton proposal-skeleton--title"
+                  className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                   style={{
                     height: 18,
                     width: "42%",
@@ -66,7 +66,7 @@ export function TreasuryQueueSkeleton() {
                 />
 
                 <div
-                  className="proposal-skeleton"
+                  className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                   style={{
                     height: 14,
                     width: "74%",
@@ -74,7 +74,7 @@ export function TreasuryQueueSkeleton() {
                   }}
                 />
                 <div
-                  className="proposal-skeleton"
+                  className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                   style={{
                     height: 14,
                     width: "58%",
@@ -90,7 +90,7 @@ export function TreasuryQueueSkeleton() {
                   }}
                 >
                   <div
-                    className="proposal-skeleton"
+                    className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                     style={{
                       height: 44,
                       width: "100%",
@@ -98,7 +98,7 @@ export function TreasuryQueueSkeleton() {
                     }}
                   />
                   <div
-                    className="proposal-skeleton"
+                    className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                     style={{
                       height: 44,
                       width: "100%",
@@ -116,7 +116,7 @@ export function TreasuryQueueSkeleton() {
                   }}
                 >
                   <div
-                    className="proposal-skeleton"
+                    className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                     style={{
                       height: 36,
                       width: 148,
@@ -124,7 +124,7 @@ export function TreasuryQueueSkeleton() {
                     }}
                   />
                   <div
-                    className="proposal-skeleton"
+                    className="bg-[linear-gradient(90deg,rgba(15,23,42,0.06)_25%,rgba(15,23,42,0.12)_50%,rgba(15,23,42,0.06)_75%)] bg-position-[200%_100%] animate-[proposal-skeleton-shimmer_1.4s_ease-in-out_infinite] motion-reduce:animate-none"
                     style={{
                       height: 36,
                       width: 116,
